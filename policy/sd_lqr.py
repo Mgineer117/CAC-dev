@@ -1,0 +1,105 @@
+import numpy as np
+import torch
+import torch.nn as nn
+from scipy.linalg import solve_continuous_are
+from torch.linalg import solve
+
+
+class SD_LQR(nn.Module):
+    def __init__(
+        self,
+        x_dim: int,
+        action_dim: int,
+        get_f_and_B: nn.Module,
+        SDC_func: nn.Module,
+        Q_scaler: float = 1.0,
+        R_scaler: float = 0.0,
+        device: str = "cpu",
+    ):
+        super().__init__()
+
+        """
+        Do not use Multiprocessor => use less batch
+        """
+        # constants
+        self.name = "SD_LQR"
+        self.device = device
+
+        self.x_dim = x_dim
+        self.action_dim = action_dim
+
+        self.get_f_and_B = get_f_and_B
+        if isinstance(self.get_f_and_B, nn.Module):
+            # set to eval mode due to dropout
+            self.get_f_and_B.eval()
+        self.SDC_func = SDC_func.eval()
+
+        self.Q_scaler = Q_scaler
+        self.R_scaler = R_scaler
+
+        #
+        self.dummy = torch.tensor(1e-5)
+        self.to(self._dtype).to(self.device)
+
+
+
+    def trim_state(self, state: torch.Tensor):
+        """Trims a state tensor into its components (x, xref, uref, t)."""
+        # state trimming
+        x = state[:, : self.x_dim].requires_grad_()
+        xref = state[:, self.x_dim : 2 * self.x_dim].requires_grad_()
+        uref = state[:, 2 * self.x_dim :].requires_grad_()
+
+        return x, xref, uref
+
+    def forward(self, state: np.ndarray):
+        state = torch.from_numpy(state).to(self._dtype).to(self.device)
+        if len(state.shape) == 1:
+            state = state.unsqueeze(0)  # shape: (1, state_dim)
+
+        # Decompose state
+        x, xref, uref = self.trim_state(state)
+
+        e = x - xref  # shape: (1, x_dim)
+        sdc_input = torch.concatenate((x, e), dim=-1)
+
+        _, B, _ = self.get_f_and_B(x)
+
+        Af, Bf = self.SDC_func(sdc_input)
+        Bf_u = (uref.view(1, self.action_dim, 1, 1) * Bf).sum(dim=1)
+
+        A = Af + Bf_u
+        A, B = A.squeeze(), B.squeeze()
+
+        # Solve Riccati equation: A^T P + P A - P B R^-1 B^T P + Q = -Q
+        Q = (self.Q_scaler + 1e-5) * torch.eye(
+            self.x_dim, dtype=self._dtype, device=self.device
+        )
+        R = (self.R_scaler + 1e-5) * torch.eye(
+            self.action_dim, dtype=self._dtype, device=self.device
+        )
+
+        # Use SciPy solver for CARE
+        A_np = A.detach().cpu().numpy()
+        B_np = B.detach().cpu().numpy()
+        Q_np = Q.detach().cpu().numpy()
+        R_np = R.detach().cpu().numpy()
+        P_np = solve_continuous_are(A_np, B_np, Q_np, R_np)
+        P = torch.from_numpy(P_np).to(A)
+
+        # Compute feedback gain: K = R^-1 B^T P
+        K = solve(R, B.T @ P)  # shape: (u_dim, x_dim)
+
+        # Compute LQR control law: u = uref - K @ e
+        u = uref - (K @ e.unsqueeze(-1)).squeeze(-1)
+
+        # Return
+        return u, {
+            "probs": self.dummy,
+            "logprobs": self.dummy,
+            "entropy": self.dummy,
+        }
+
+    def learn(self, batch):
+        """Performs a single training step using PPO, incorporating all reference training steps."""
+        pass

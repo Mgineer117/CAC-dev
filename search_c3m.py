@@ -61,7 +61,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WandB Sweep Launcher for C3M")
     parser.add_argument("--sweep_id", type=str, default=None, help="WandB sweep ID to join")
     parser.add_argument("--count", type=int, default=100, help="Number of trials to run")
-    parser.add_argument("--project", type=str, default="AEOS-SWEEP-C3M", help="WandB project name")
+    parser.add_argument("--project", type=str, default="C3M-SWEEP", help="WandB project name")
     
     # Parse only known search-specific args
     search_args, remaining_args = parser.parse_known_args()

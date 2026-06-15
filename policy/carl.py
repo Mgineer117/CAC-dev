@@ -55,6 +55,7 @@ class CARL(Base):
         tracking_scaler: float = 1.0,
         control_scaler: float = 0.0,
         nupdates: int = 1,
+        policy_updates_per_cmg_update: int = 50,
         warmup_epochs: int = 10000,
         device: str = "cpu",
     ):
@@ -97,6 +98,7 @@ class CARL(Base):
             self.get_f_and_B.eval()
 
         self.nupdates = nupdates
+        self.policy_updates_per_cmg_update = policy_updates_per_cmg_update
         self.num_W_updates = 1
         self.num_RL_updates = 1
 
@@ -384,7 +386,7 @@ class CARL(Base):
         # Implement the freeze-and-learn scheme here
         W_update_time = 0
         if (
-            self.num_RL_updates % 50 == 0
+            self.num_RL_updates % self.policy_updates_per_cmg_update == 0
             and not self.stop_W_training
             and not self.disable_CMG_training
         ):

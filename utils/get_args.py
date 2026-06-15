@@ -99,6 +99,12 @@ def get_args():
         "--lbd", type=float, default=0.1, help="Desired contraction rate."
     )
     parser.add_argument(
+        "--policy-updates-per-cmg-update",
+        type=int,
+        default=5,
+        help="Number of policy updates per CMG update.",
+    )
+    parser.add_argument(
         "--DynamicLearner-dim",
         type=list,
         default=[256, 256],

@@ -53,10 +53,7 @@ class Utilities(nn.Module):
     def get_matrix_eig(self, A: torch.Tensor):
         """Calculates and returns the mean eigenvalues of a symmetric matrix."""
         with torch.no_grad():
-            if A.device.type == "mps":
-                eigvals = torch.linalg.eigvalsh(A.cpu()).to(A.device)
-            else:
-                eigvals = torch.linalg.eigvalsh(A)  # (batch, dim), real symmetric
+            eigvals = torch.linalg.eigvalsh(A)  # (batch, dim), real symmetric
         return eigvals.mean(0).cpu().numpy()
 
     def average_dict_values(self, dict_list):
@@ -249,6 +246,18 @@ class Base(Utilities, ABC):  # Inherit from Utilities and make abstract
         # Note: All the lists (Cu_eigenvalues_records, etc.)
         # and loss functions (l1_loss, etc.) are
         # automatically inherited. No need to redefine them.
+
+    def trim_state(self, state: torch.Tensor):
+        """Trims a state tensor into its components (x, xref, uref, t)."""
+        # state trimming
+        x = state[:, : self.x_dim].requires_grad_()
+        xref = state[:, self.x_dim : 2 * self.x_dim].requires_grad_()
+        uref = state[
+            :, 2 * self.x_dim : 2 * self.x_dim + self.action_dim
+        ].requires_grad_()
+        t = state[:, -1].unsqueeze(-1)
+
+        return x, xref, uref, t
 
     def define_loss_lists(self):
         (
@@ -461,7 +470,7 @@ class Base(Utilities, ABC):  # Inherit from Utilities and make abstract
         zTAz = matmul(matmul(zT, A), z)
 
         loss_eigen = torch.relu(-zTAz).mean()
-        loss_reg = torch.relu(zTAz - 500).mean()
+        loss_reg = torch.relu(zTAz - 200).mean()
 
         return loss_eigen, loss_reg if reg else 0
 
@@ -523,10 +532,10 @@ class Base(Utilities, ABC):  # Inherit from Utilities and make abstract
         n = x.shape[0]
         x_dim = x.shape[-1]
 
-        DBDx = torch.zeros(n, x_dim, x_dim, self.u_dim).to(
+        DBDx = torch.zeros(n, x_dim, x_dim, self.action_dim).to(
             dtype=self._dtype, device=self.device
         )
-        for i in range(self.u_dim):
+        for i in range(self.action_dim):
             DBDx[:, :, :, i] = self.Jacobian(B[:, :, i], x)
         return DBDx
 

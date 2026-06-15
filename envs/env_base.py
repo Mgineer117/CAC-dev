@@ -119,6 +119,7 @@ class BaseEnv(gym.Env):
                     "Only replace_x_0 option is implemented for now."
                 )
 
+        self.x_0 = self.x_t.copy()
         state = self.construct_state(self.x_t)
         self.init_tracking_error = np.linalg.norm(self.x_t - self.xref[0], ord=2) ** 2
 
@@ -374,8 +375,8 @@ class BaseEnv(gym.Env):
 
         # Calculate Contraction Bounds
         bound = None
-        policy_name = getattr(self.policy, "name", "").lower() if hasattr(self, "policy") else ""
-        if policy_name in ["c3m", "lqr", "carl", "trpo", "cpo", "sd_lqr", "ppo", "cac"]:
+        policy_name = self.policy.__class__.__name__.lower() if hasattr(self, "policy") else ""
+        if policy_name in ["c3m", "lqr", "carl", "trpo", "cpo", "sd_lqr", "ppo", "cac", "algorithm"]:
             lbd = getattr(self, "lbd", getattr(self.policy, "lbd", 0.0))
             gamma = getattr(self, "gamma", getattr(self.policy, "gamma", 1.0))
             
@@ -388,11 +389,19 @@ class BaseEnv(gym.Env):
                     eigvals = np.linalg.eigvals(M)
                     if np.min(np.real(eigvals)) > 0:
                         cond = np.sqrt(np.max(np.real(eigvals)) / np.min(np.real(eigvals)))
-            elif policy_name in ["carl", "trpo", "cpo", "ppo", "cac"]:
-                if hasattr(self.policy, "W_net") and hasattr(self, "x_0"):
+                elif hasattr(self.policy, "CMG") and hasattr(self, "x_0"):
                     import torch
                     x0 = torch.tensor(self.x_0, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
-                    W = self.policy.W_net(x0).detach().squeeze(0).cpu().numpy()
+                    W = self.policy.CMG(x0)[0].detach().squeeze(0).cpu().numpy()
+                    M = W.T @ W
+                    eigvals = np.linalg.eigvals(M)
+                    if np.min(np.real(eigvals)) > 0:
+                        cond = np.sqrt(np.max(np.real(eigvals)) / np.min(np.real(eigvals)))
+            elif policy_name in ["carl", "trpo", "cpo", "ppo", "cac"]:
+                if hasattr(self.policy, "CMG") and hasattr(self, "x_0"):
+                    import torch
+                    x0 = torch.tensor(self.x_0, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
+                    W = self.policy.CMG(x0)[0].detach().squeeze(0).cpu().numpy()
                     M = W.T @ W
                     eigvals = np.linalg.eigvals(M)
                     if np.min(np.real(eigvals)) > 0:
@@ -639,11 +648,12 @@ class BaseEnv(gym.Env):
         error = self.x_t - self.xref[self.time_steps]
         error = self.wrap_angles(error)
 
-        if hasattr(self, "policy") and getattr(self.policy, "name", "") == "carl" and self.reward_mode != "inverse":
+        policy_name = self.policy.__class__.__name__.lower() if hasattr(self, "policy") else ""
+        if policy_name == "carl" and self.reward_mode != "inverse":
             import torch
             with torch.no_grad():
                 x_tensor = torch.tensor(self.x_t, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
-                W = self.policy.W_net(x_tensor).squeeze(0).cpu().numpy()
+                W = self.policy.CMG(x_tensor)[0].squeeze(0).cpu().numpy()
                 M = W.T @ W
                 tracking_error = error.T @ M @ error
                 

@@ -236,6 +236,7 @@ def get_policy(env, args, get_f_and_B, SDC_func=None):
             gae=args.gae,
             K=args.K_epochs,
             nupdates=nupdates,
+            policy_updates_per_cmg_update=args.policy_updates_per_cmg_update,
             device=args.device,
         )
 

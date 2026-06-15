@@ -250,7 +250,7 @@ class Evaluator:
             "eval/performance_score": lbd_mean / (overshoot_mean + 1e-8),
         }
         
-        policy_name = getattr(self.policy, "name", "").lower() if hasattr(self, "policy") else ""
+        policy_name = self.policy.__class__.__name__.lower() if hasattr(self, "policy") else ""
         if policy_name == "c3m":
             provided_lbd = getattr(self.eval_env, "lbd", getattr(self.policy, "lbd", 0.0))
             eval_dict["eval/contraction_rate_diff"] = lbd_mean - provided_lbd
@@ -335,7 +335,7 @@ class Evaluator:
         
         # Determine theoretical overshoot bound factor
         factor = 1.0
-        policy_name = getattr(self.policy, "name", "")
+        policy_name = self.policy.__class__.__name__.lower() if hasattr(self, "policy") else ""
         if policy_name == "c3m":
             if hasattr(self.policy, "W"):
                 W = self.policy.W.detach().cpu().numpy()
@@ -344,11 +344,19 @@ class Evaluator:
                 eigvals = np.linalg.eigvals(M)
                 if np.min(np.real(eigvals)) > 0:
                     factor = np.sqrt(np.max(np.real(eigvals)) / np.min(np.real(eigvals)))
-        elif policy_name == "carl":
-            if hasattr(self.policy, "W_net") and hasattr(self.eval_env, "x_0"):
+            elif hasattr(self.policy, "CMG") and hasattr(self.eval_env, "x_0"):
                 import torch
                 x0 = torch.tensor(self.eval_env.x_0, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
-                W = self.policy.W_net(x0).detach().squeeze(0).cpu().numpy()
+                W = self.policy.CMG(x0)[0].detach().squeeze(0).cpu().numpy()
+                M = W.T @ W
+                eigvals = np.linalg.eigvals(M)
+                if np.min(np.real(eigvals)) > 0:
+                    factor = np.sqrt(np.max(np.real(eigvals)) / np.min(np.real(eigvals)))
+        elif policy_name in ["carl", "trpo", "cpo", "ppo", "cac"]:
+            if hasattr(self.policy, "CMG") and hasattr(self.eval_env, "x_0"):
+                import torch
+                x0 = torch.tensor(self.eval_env.x_0, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
+                W = self.policy.CMG(x0)[0].detach().squeeze(0).cpu().numpy()
                 M = W.T @ W
                 eigvals = np.linalg.eigvals(M)
                 if np.min(np.real(eigvals)) > 0:

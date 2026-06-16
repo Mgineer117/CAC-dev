@@ -33,7 +33,7 @@ def get_args():
     parser.add_argument(
         "--policy-mode",
         type=str,
-        default="stochastic",
+        default=None,
         help='Policy mode: ["deterministic", "stochastic"].',
     )
     parser.add_argument(
@@ -44,13 +44,13 @@ def get_args():
     parser.add_argument(
         "--CMG-mode",
         type=str,
-        default="deterministic",
+        default=None,
         help='CMG mode: ["deterministic", "stochastic"].',
     )
     parser.add_argument(
         "--policy-type",
         type=str,
-        default="CL",
+        default=None,
         help='Policy type: ["EncoderCL", "CL", "RL"].',
     )
     parser.add_argument("--seed", type=int, default=42, help="Seed.")
@@ -79,15 +79,15 @@ def get_args():
         help="SDC decomposition neural net learning rate.",
     )
 
-    parser.add_argument("--W-lr", type=float, default=1e-4, help="CMG learning rate.")
+    parser.add_argument("--W-lr", type=float, default=None, help="CMG learning rate.")
     parser.add_argument(
-        "--u-lr", type=float, default=1e-4, help="C3M actor learning rate."
+        "--u-lr", type=float, default=None, help="C3M actor learning rate."
     )
     parser.add_argument(
-        "--w-ub", type=float, default=100.0, help="Contraction metric upper bound."
+        "--w-ub", type=float, default=None, help="Contraction metric upper bound."
     )
     parser.add_argument(
-        "--w-lb", type=float, default=1e-1, help="Contraction metric lower bound."
+        "--w-lb", type=float, default=None, help="Contraction metric lower bound."
     )
     parser.add_argument(
         "--eps-clip", type=float, default=0.1, help="Epsilon clip for PPO."
@@ -96,7 +96,7 @@ def get_args():
         "--eps", type=float, default=0.1, help="Used for CMG learning regularization."
     )
     parser.add_argument(
-        "--lbd", type=float, default=0.1, help="Desired contraction rate."
+        "--lbd", type=float, default=None, help="Desired contraction rate."
     )
     parser.add_argument(
         "--policy-updates-per-cmg-update",
@@ -124,7 +124,7 @@ def get_args():
     )
 
     parser.add_argument(
-        "--c3m-epochs", type=int, default=10000, help="Number of training samples."
+        "--c3m-epochs", type=int, default=None, help="Number of training samples."
     )
     parser.add_argument(
         "--dynamics-epochs",
@@ -139,10 +139,10 @@ def get_args():
         help="Number of training samples.",
     )
     parser.add_argument(
-        "--timesteps", type=int, default=1e6, help="Number of training samples."
+        "--timesteps", type=int, default=None, help="Number of training samples."
     )
     parser.add_argument(
-        "--num-windows", type=int, default=1, help="Number of training samples."
+        "--num-windows", type=int, default=None, help="Number of training samples."
     )
     parser.add_argument(
         "--log-interval",
@@ -208,17 +208,17 @@ def get_args():
     parser.add_argument(
         "--reward-mode",
         type=str,
-        default="default",
+        default=None,
         help="Reward mode for the environment.",
     )
     parser.add_argument(
-        "--anneal-stddev", action="store_true", help="Anneal stddev during training."
+        "--anneal-stddev", action="store_true", default=None, help="Anneal stddev during training."
     )
     parser.add_argument(
         "--entropy-scaler", type=float, default=0.0, help="Entropy scaling factor."
     )
     parser.add_argument(
-        "--W-entropy-scaler", type=float, default=1e-3, help="W entropy scaling factor."
+        "--W-entropy-scaler", type=float, default=None, help="W entropy scaling factor."
     )
     parser.add_argument(
         "--control-scaler",
@@ -237,6 +237,28 @@ def get_args():
     parser.add_argument("--rendering", action="store_true", help="Render environment as video to wandb.")
 
     args = parser.parse_args()
+
+    import json
+    import os
+
+    # Load task config
+    task_config_path = os.path.join("config", "task", f"{args.task}.json")
+    if os.path.exists(task_config_path):
+        with open(task_config_path, "r") as f:
+            task_config = json.load(f)
+        for k, v in task_config.items():
+            if getattr(args, k, None) is None:
+                setattr(args, k, v)
+
+    # Load algo config
+    algo_config_path = os.path.join("config", "algorithm", f"{args.algo_name}.json")
+    if os.path.exists(algo_config_path):
+        with open(algo_config_path, "r") as f:
+            algo_config = json.load(f)
+        for k, v in algo_config.items():
+            if getattr(args, k, None) is None:
+                setattr(args, k, v)
+
     args.device = select_device(args.gpu_idx)
 
     return args

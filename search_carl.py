@@ -71,7 +71,7 @@ if __name__ == "__main__":
     search_args, remaining_args = parser.parse_known_args()
     
     # Overwrite sys.argv so get_args() in train() doesn't fail on unknown args
-    sys.argv = [sys.argv[0]] + remaining_args
+    sys.argv = [sys.argv[0]] + remaining_args + ["--algo-name", "carl"]
 
     torch.set_default_dtype(torch.float32)
 

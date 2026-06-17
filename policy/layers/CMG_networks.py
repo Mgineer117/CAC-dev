@@ -4,8 +4,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import MultivariateNormal, Normal
 
+from typing import Union
 from policy.base import Base
-from policy.layers.building_blocks import MLP
+from policy.layers.building_blocks import MLP, SirenNet
 
 
 class CCM_Generator(nn.Module):
@@ -28,7 +29,7 @@ class CCM_Generator(nn.Module):
         self,
         x_dim: int,
         hidden_dim: list,
-        activation: nn.Module = nn.Tanh(),
+        activation: Union[str, nn.Module] = nn.Tanh(),
         mode: str = "stochastic",
         device: str = "cpu",
     ):
@@ -39,8 +40,18 @@ class CCM_Generator(nn.Module):
         self.mode = mode
         self.device = device
 
-        # Define the MLP model with given input dimension and hidden layers
-        self.model = MLP(input_dim=x_dim, hidden_dims=hidden_dim, activation=activation)
+        # Define the model with given input dimension and hidden layers
+        if isinstance(activation, str) and activation.lower() == "siren":
+            self.model = SirenNet(input_dim=x_dim, hidden_dims=hidden_dim, device=device)
+        else:
+            if isinstance(activation, str):
+                if activation.lower() == "tanh":
+                    activation = nn.Tanh()
+                elif activation.lower() == "relu":
+                    activation = nn.ReLU()
+                else:
+                    raise ValueError(f"Unknown activation: {activation}")
+            self.model = MLP(input_dim=x_dim, hidden_dims=hidden_dim, activation=activation, device=device)
 
         # Linear layers for the mean (mu) and log-std (logstd) of the Gaussian distribution
         self.mu = torch.nn.Linear(hidden_dim[-1], x_dim * x_dim)

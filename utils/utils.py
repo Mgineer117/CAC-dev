@@ -102,12 +102,14 @@ def _create_actor_critic(args):
     return actor, critic
 
 
-def _create_cmg(x_dim: int, mode: str, device: torch.device) -> CCM_Generator:
+def _create_cmg(args, mode: str, device: torch.device) -> CCM_Generator:
     """Helper to create the CCM Generator."""
+    cmg_hidden_dims = getattr(args, "cmg_hidden_dims", [128, 128])
+    cmg_activation = getattr(args, "cmg_activation", "tanh")
     return CCM_Generator(
-        x_dim=x_dim,
-        hidden_dim=[128, 128],
-        activation=nn.Tanh(),
+        x_dim=args.x_dim,
+        hidden_dim=cmg_hidden_dims,
+        activation=cmg_activation,
         mode=mode,
         device=device,
     )
@@ -177,7 +179,7 @@ def get_policy(env, args, get_f_and_B, SDC_func=None):
 
     # --- 3. C3M Family ---
     elif algo == "c3m":
-        CMG = _create_cmg(args.x_dim, mode="deterministic", device=args.device)
+        CMG = _create_cmg(args, mode="deterministic", device=args.device)
         # C3M uses a specific deterministic actor
         actor = CLActor(x_dim=args.x_dim, u_dim=args.u_dim, mode="deterministic")
         data = env.get_rollout(args.c3m_buffer_size, mode="c3m")
@@ -202,7 +204,7 @@ def get_policy(env, args, get_f_and_B, SDC_func=None):
         )
 
     elif algo == "carl":
-        CMG = _create_cmg(args.x_dim, mode=args.CMG_mode, device=args.device)
+        CMG = _create_cmg(args, mode=args.CMG_mode, device=args.device)
         actor, critic = _create_actor_critic(args)
         data = env.get_rollout(args.c3m_buffer_size, mode="c3m")
 
@@ -241,7 +243,7 @@ def get_policy(env, args, get_f_and_B, SDC_func=None):
         )
 
     elif algo == "cpo":
-        CMG = _create_cmg(args.x_dim, mode=args.CMG_mode, device=args.device)
+        CMG = _create_cmg(args, mode=args.CMG_mode, device=args.device)
         actor, critic = _create_actor_critic(args)
         data = env.get_rollout(args.c3m_buffer_size, mode="c3m")
 

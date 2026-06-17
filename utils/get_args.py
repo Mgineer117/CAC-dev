@@ -111,6 +111,18 @@ def get_args():
         help="Dynamic approximator hidden layer.",
     )
     parser.add_argument(
+        "--cmg-hidden-dims",
+        type=list,
+        default=[128, 128],
+        help="CMG network hidden layer dimensions.",
+    )
+    parser.add_argument(
+        "--cmg-activation",
+        type=str,
+        default="tanh",
+        help="CMG network activation function ['tanh', 'relu', 'siren'].",
+    )
+    parser.add_argument(
         "--SDCLearner-dim",
         type=list,
         default=[256, 256],

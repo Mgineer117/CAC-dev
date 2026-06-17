@@ -1,3 +1,4 @@
+import numpy as np
 from typing import Optional, Union
 
 import torch
@@ -80,6 +81,82 @@ class MLP(nn.Module):
             self.output_dim = output_dim
 
         self.model = nn.Sequential(*model).to(device)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.model(x)
+
+
+class SineLayer(nn.Module):
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        bias: bool = True,
+        is_first: bool = False,
+        omega_0: float = 30.0,
+    ):
+        super().__init__()
+        self.omega_0 = omega_0
+        self.is_first = is_first
+        self.in_features = in_features
+        self.linear = nn.Linear(in_features, out_features, bias=bias)
+        self.init_weights()
+
+    def init_weights(self):
+        with torch.no_grad():
+            if self.is_first:
+                self.linear.weight.uniform_(
+                    -1 / self.in_features, 1 / self.in_features
+                )
+            else:
+                self.linear.weight.uniform_(
+                    -np.sqrt(6 / self.in_features) / self.omega_0,
+                    np.sqrt(6 / self.in_features) / self.omega_0,
+                )
+
+    def forward(self, input: torch.Tensor) -> torch.Tensor:
+        return torch.sin(self.omega_0 * self.linear(input))
+
+
+class SirenNet(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dims: Union[list[int], tuple[int]],
+        output_dim: Optional[int] = None,
+        first_omega_0: float = 30.0,
+        hidden_omega_0: float = 30.0,
+        device=torch.device("cpu"),
+    ) -> None:
+        super().__init__()
+
+        self.net = []
+        self.net.append(
+            SineLayer(
+                input_dim, hidden_dims[0], is_first=True, omega_0=first_omega_0
+            )
+        )
+
+        for in_dim, out_dim in zip(hidden_dims[:-1], hidden_dims[1:]):
+            self.net.append(
+                SineLayer(
+                    in_dim, out_dim, is_first=False, omega_0=hidden_omega_0
+                )
+            )
+
+        if output_dim is not None:
+            final_linear = nn.Linear(hidden_dims[-1], output_dim)
+            with torch.no_grad():
+                final_linear.weight.uniform_(
+                    -np.sqrt(6 / hidden_dims[-1]) / hidden_omega_0,
+                    np.sqrt(6 / hidden_dims[-1]) / hidden_omega_0,
+                )
+            self.net.append(final_linear)
+            self.output_dim = output_dim
+        else:
+            self.output_dim = hidden_dims[-1]
+
+        self.model = nn.Sequential(*self.net).to(device)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)

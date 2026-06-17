@@ -253,7 +253,7 @@ class Base(Utilities, ABC):  # Inherit from Utilities and make abstract
         x = state[:, : self.x_dim].requires_grad_()
         xref = state[:, self.x_dim : 2 * self.x_dim].requires_grad_()
         uref = state[
-            :, 2 * self.x_dim : 2 * self.x_dim + self.action_dim
+            :, 2 * self.x_dim : 2 * self.x_dim + self.u_dim
         ].requires_grad_()
         t = state[:, -1].unsqueeze(-1)
 
@@ -532,10 +532,10 @@ class Base(Utilities, ABC):  # Inherit from Utilities and make abstract
         n = x.shape[0]
         x_dim = x.shape[-1]
 
-        DBDx = torch.zeros(n, x_dim, x_dim, self.action_dim).to(
+        DBDx = torch.zeros(n, x_dim, x_dim, self.u_dim).to(
             dtype=self._dtype, device=self.device
         )
-        for i in range(self.action_dim):
+        for i in range(self.u_dim):
             DBDx[:, :, :, i] = self.Jacobian(B[:, :, i], x)
         return DBDx
 

@@ -165,8 +165,8 @@ def get_args():
     parser.add_argument(
         "--corl-pretrain-epochs",
         type=int,
-        default=30000,
-        help="CORL: number of CMG pretraining epochs (contraction loss only).",
+        default=5000,
+        help="CORL: max number of CMG pretraining epochs (early stopping may end it sooner).",
     )
     parser.add_argument(
         "--corl-pretrain-buffer-size",
@@ -179,6 +179,30 @@ def get_args():
         type=int,
         default=1024,
         help="CORL: minibatch size used during CMG pretraining.",
+    )
+    parser.add_argument(
+        "--corl-val-split",
+        type=float,
+        default=0.1,
+        help="CORL: held-out fraction of pretrain states for early-stopping validation.",
+    )
+    parser.add_argument(
+        "--corl-val-interval",
+        type=int,
+        default=25,
+        help="CORL: epochs between validation-loss evaluations during pretraining.",
+    )
+    parser.add_argument(
+        "--corl-plateau-tol",
+        type=float,
+        default=1e-3,
+        help="CORL: relative moving-average change below which the val loss is a plateau.",
+    )
+    parser.add_argument(
+        "--corl-plateau-patience",
+        type=int,
+        default=3,
+        help="CORL: consecutive plateau checks required to early-stop pretraining.",
     )
     parser.add_argument(
         "--DynamicLearner-dim",

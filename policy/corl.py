@@ -36,11 +36,18 @@ class CORL(CARL):
         SDC_func: nn.Module = None,
         Q_scaler: float = 1.0,
         R_scaler: float = 0.0,
-        pretrain_epochs: int = 30000,
+        pretrain_epochs: int = 5000,
         pretrain_buffer_size: int = 10000,
         pretrain_minibatch_size: int = 1024,
-        pretrain_patience: int = 200,
         pretrain_log_interval: int = 100,
+        # early stopping (validation total-loss + plateau-slope + restore-best)
+        val_split: float = 0.1,
+        val_batch_size: int = 512,
+        val_interval: int = 25,
+        plateau_window: int = 5,
+        plateau_tol: float = 1e-3,
+        plateau_patience: int = 3,
+        restore_best: bool = True,
         logger=None,
         writer=None,
         **kwargs,
@@ -67,8 +74,16 @@ class CORL(CARL):
         self.pretrain_epochs = pretrain_epochs
         self.pretrain_buffer_size = pretrain_buffer_size
         self.pretrain_minibatch_size = pretrain_minibatch_size
-        self.pretrain_patience = pretrain_patience
         self.pretrain_log_interval = pretrain_log_interval
+
+        # early stopping: validation total-loss, plateau-slope rule, restore best
+        self.val_split = val_split
+        self.val_batch_size = val_batch_size
+        self.val_interval = val_interval
+        self.plateau_window = plateau_window
+        self.plateau_tol = plateau_tol
+        self.plateau_patience = plateau_patience
+        self.restore_best = restore_best
 
         # logging handles (optional; set by get_policy). Pretraining happens in
         # __init__ before the trainer exists, so we log here directly.
@@ -85,6 +100,8 @@ class CORL(CARL):
             "W_cond": [],
             "W_lr": [],
         }
+        # validation curve (sampled every val_interval epochs)
+        self.val_history = {"epoch": [], "val_loss": []}
 
         # running-average reward normalizer (EMA of |raw reward| magnitude)
         self.reward_norm_beta = 0.99
@@ -166,6 +183,17 @@ class CORL(CARL):
             "K": torch.cat(K_list, dim=0),  # (n, u_dim, x_dim)
         }
         self.pretrain_size = n
+
+        # Hold out an in-distribution validation split for early stopping.
+        perm = torch.randperm(n, device=self.device)
+        n_val = max(1, int(self.val_split * n))
+        self.val_indices = perm[:n_val]
+        self.train_indices = perm[n_val:]
+        if len(self.train_indices) == 0:  # tiny buffers: fall back to shared set
+            self.train_indices = perm
+        v = min(n_val, self.val_batch_size)
+        vb = self.val_indices[:v]
+        self.val_batch = {k: self.pretrain_data[k][vb] for k in self.pretrain_data}
 
     # ------------------------------------------------------------------ #
     # Pretraining: minimize only the contraction loss Cu (no c1/c2)
@@ -267,18 +295,113 @@ class CORL(CARL):
                     continue
                 self.writer.add_scalar(f"{self.name}/pretrain/{k}", v, epoch)
 
-    def pretrain_CMG(self):
-        """Pretrain the CMG with the contraction loss formed from SD-LQR controls."""
-        self._build_pretrain_buffer()
+        # Real-time wandb curves against a custom pretrain-epoch x-axis. Downsampled
+        # so the number of global-step increments stays small (see _setup_wandb_pretrain).
+        if getattr(self, "_wandb_active", False) and (
+            epoch % self._wandb_interval == 0 or epoch == self.pretrain_epochs - 1
+        ):
+            import wandb
 
-        best_loss, stagnant_epochs = float("inf"), 0
+            payload = {
+                f"{self.name}/pretrain/{k}": v
+                for k, v in record.items()
+                if k != "epoch"
+            }
+            payload[f"{self.name}/pretrain/epoch"] = epoch
+            wandb.log(payload)
+
+    def _log_validation(self, epoch: int, val_loss: float):
+        """Log the held-out validation loss to TensorBoard and wandb."""
+        if self.writer is not None:
+            self.writer.add_scalar(f"{self.name}/pretrain/val_loss", val_loss, epoch)
+        if getattr(self, "_wandb_active", False):
+            import wandb
+
+            wandb.log(
+                {
+                    f"{self.name}/pretrain/val_loss": val_loss,
+                    f"{self.name}/pretrain/epoch": epoch,
+                }
+            )
+
+    def _setup_wandb_pretrain(self):
+        """Register a custom epoch x-axis so pretraining curves stream live to wandb.
+
+        wandb shares one monotonically-increasing global step across the whole run
+        (SDC training -> pretraining -> RL). We therefore (a) plot pretrain metrics
+        against their own ``pretrain/epoch`` axis via define_metric, and (b) downsample
+        so pretraining adds only a few hundred global-step increments, keeping it from
+        clobbering the trainer's step sequence.
+        """
+        self._wandb_active = False
+        try:
+            import wandb
+
+            if wandb.run is None:
+                return
+            wandb.define_metric(f"{self.name}/pretrain/epoch")
+            wandb.define_metric(
+                f"{self.name}/pretrain/*", step_metric=f"{self.name}/pretrain/epoch"
+            )
+            max_points = 300
+            self._wandb_interval = max(1, self.pretrain_epochs // max_points)
+            self._wandb_active = True
+        except Exception as exc:  # pragma: no cover
+            print(f"[CORL] wandb pretrain logging unavailable: {exc}")
+
+    def _validation_loss(self):
+        """Total pretrain loss on the held-out (in-distribution) validation batch."""
+        was_training = self.training
+        self.eval()
+        # compute_pretrain_loss still needs the autograd graph for the metric
+        # Jacobians, but we never call backward here, so no parameter grads accumulate.
+        loss, _ = self.compute_pretrain_loss(self.val_batch)
+        val = loss.item()
+        if was_training:
+            self.train()
+        return val
+
+    def _plateau_reached(self):
+        """Plateau-slope rule: True once the moving average of the validation loss
+        flattens (relative change < tol) for ``plateau_patience`` consecutive checks."""
+        vals = self.val_history["val_loss"]
+        w = self.plateau_window
+        if len(vals) < 2 * w:  # need two full windows
+            return False
+        ma_now = float(np.mean(vals[-w:]))
+        ma_prev = float(np.mean(vals[-2 * w : -w]))
+        rel = abs(ma_now - ma_prev) / (abs(ma_prev) + 1e-12)
+        if rel < self.plateau_tol:
+            self._plateau_count = getattr(self, "_plateau_count", 0) + 1
+        else:
+            self._plateau_count = 0
+        return self._plateau_count >= self.plateau_patience
+
+    def _snapshot_best(self):
+        return {k: v.detach().clone() for k, v in self.CMG.state_dict().items()}
+
+    def pretrain_CMG(self):
+        """Pretrain the CMG with the contraction loss formed from SD-LQR controls.
+
+        Early stopping: monitor the validation total-loss on a held-out split; stop
+        when its moving-average slope plateaus; restore the best-validation weights.
+        """
+        self._build_pretrain_buffer()
+        self._setup_wandb_pretrain()
+
+        best_val = float("inf")
+        best_state = self._snapshot_best()
+        best_epoch = 0
+        self._plateau_count = 0
+        stopped_reason = f"reached max epochs ({self.pretrain_epochs})"
         self.train()
 
         with tqdm(range(self.pretrain_epochs), desc="CORL CMG Pretrain") as pbar:
             for epoch in pbar:
-                # sample a minibatch from the precomputed SD-LQR buffer
-                mb = min(self.pretrain_minibatch_size, self.pretrain_size)
-                idx = torch.randperm(self.pretrain_size, device=self.device)[:mb]
+                # sample a minibatch from the TRAIN split of the SD-LQR buffer
+                mb = min(self.pretrain_minibatch_size, len(self.train_indices))
+                sel = torch.randperm(len(self.train_indices), device=self.device)[:mb]
+                idx = self.train_indices[sel]
                 batch = {k: v[idx] for k, v in self.pretrain_data.items()}
 
                 loss, infos = self.compute_pretrain_loss(batch)
@@ -288,9 +411,30 @@ class CORL(CARL):
                 current_loss = loss.item()
                 self._log_pretrain_step(epoch, current_loss, infos, grad_norm)
 
+                # --- validation + early-stopping check --- #
+                if epoch % self.val_interval == 0 or epoch == self.pretrain_epochs - 1:
+                    val_loss = self._validation_loss()
+                    self.val_history["epoch"].append(epoch)
+                    self.val_history["val_loss"].append(val_loss)
+                    self._log_validation(epoch, val_loss)
+
+                    if val_loss < best_val:
+                        best_val = val_loss
+                        best_epoch = epoch
+                        if self.restore_best:
+                            best_state = self._snapshot_best()
+
+                    if self._plateau_reached():
+                        stopped_reason = (
+                            f"validation plateau at epoch {epoch} "
+                            f"(val_loss={val_loss:.4f})"
+                        )
+                        pbar.write(f"✓ CORL pretrain early-stopped: {stopped_reason}")
+                        break
+
                 pbar.set_postfix(
                     loss=f"{current_loss:.4f}",
-                    pd=f"{infos['pd_loss'].item():.3g}",
+                    val=f"{best_val:.4f}",
                     cu_max=f"{infos['cu_max_eig']:.2g}",
                 )
 
@@ -298,38 +442,56 @@ class CORL(CARL):
                 if epoch % self.pretrain_log_interval == 0:
                     pbar.write(
                         f"[CORL pretrain {epoch}] loss={current_loss:.4f} "
+                        f"best_val={best_val:.4f} "
                         f"pd={infos['pd_loss'].item():.3g} "
-                        f"overshoot={infos['overshoot_loss'].item():.3g} "
                         f"cu_max_eig={infos['cu_max_eig']:.3g} "
                         f"W_cond={infos['W_cond']:.3g} grad={grad_norm:.3g}"
                     )
-
-                if current_loss < best_loss:
-                    best_loss = current_loss
-                    stagnant_epochs = 0
-                else:
-                    stagnant_epochs += 1
-
-                if stagnant_epochs >= self.pretrain_patience:
-                    pbar.write(
-                        f"✓ CORL pretrain converged: loss {current_loss:.4f} "
-                        f"stable for {self.pretrain_patience} epochs."
-                    )
-                    break
             else:
-                pbar.write(
-                    f"⚠ CORL pretrain reached max epochs ({self.pretrain_epochs})."
-                )
+                pbar.write(f"⚠ CORL pretrain {stopped_reason}.")
+
+        # Restore the best-validation checkpoint.
+        if self.restore_best:
+            self.CMG.load_state_dict(best_state)
+            print(
+                f"[CORL] restored best CMG (val_loss={best_val:.4f} @ epoch {best_epoch})."
+            )
+        self.pretrain_summary = {
+            "best_val_loss": best_val,
+            "best_epoch": best_epoch,
+            "stopped_reason": stopped_reason,
+        }
 
         self.eval()
         # Freeze CMG: stop_W_training together with disable_CMG_training guarantees
         # the contraction metric is fixed during RL.
         self.stop_W_training = True
-        self.warmup_result = self._plot_pretrain_result()
         self._dump_pretrain_csv()
 
-        # Free the precomputed buffer to save memory.
+        fig = self._plot_pretrain_result()
+        if getattr(self, "_wandb_active", False):
+            # Log the summary figure ourselves (at the current valid global step) and
+            # skip main.py's step-0 image re-log, which wandb would drop.
+            import wandb
+
+            wandb.log({f"{self.name}/pretrain/summary_curves": wandb.Image(fig)})
+            self.warmup_result = None
+        else:
+            self.warmup_result = fig
+
+        # Free the precomputed pretraining tensors. These live on the compute device
+        # as plain attributes (not registered buffers), so leaving them around breaks
+        # multiprocessing sampling on MPS/CUDA (the policy is pickled onto CPU workers
+        # and stray device tensors cannot be shared). They are only needed here.
         del self.pretrain_data
+        del self.val_batch
+        del self.train_indices
+        del self.val_indices
+
+        # Drop the SDC network: it is only used to form SD-LQR controls during
+        # pretraining, and its Adam optimizer keeps moment tensors on the compute
+        # device (not moved by to_device), which would also break MP pickling.
+        self.SDC_func = None
 
     def _plot_pretrain_result(self):
         """Build a diagnostic figure of the CMG pretraining curves."""
@@ -347,7 +509,7 @@ class CORL(CARL):
             ("grad_norm", "CMG grad norm", True),
         ]
         for axi, (key, title, logy) in zip(ax.ravel(), panels):
-            axi.plot(e, h[key])
+            axi.plot(e, h[key], label="train")
             axi.set_title(title)
             axi.set_xlabel("pretrain epoch")
             axi.grid(True, ls="--", alpha=0.5)
@@ -356,6 +518,16 @@ class CORL(CARL):
             if len(h[key]) > 0:
                 axi.text(0.98, 0.95, f"{h[key][-1]:.3g}", ha="right", va="top",
                          transform=axi.transAxes, fontsize=9)
+        # overlay held-out validation loss (early-stopping signal) on the loss panel
+        if len(self.val_history["epoch"]) > 0:
+            ax[0, 0].plot(
+                self.val_history["epoch"], self.val_history["val_loss"],
+                "r.-", label="val (early-stop)",
+            )
+            ax[0, 0].legend(fontsize=8)
+            summ = getattr(self, "pretrain_summary", {})
+            if "best_epoch" in summ:
+                ax[0, 0].axvline(summ["best_epoch"], color="g", ls=":", lw=1)
         ax[1, 0].axhline(0.0, color="r", ls=":", lw=1)  # Cu target
         fig.suptitle("CORL CMG Pretraining (SD-LQR contraction loss)")
         plt.tight_layout()

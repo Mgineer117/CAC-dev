@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Number of agents to run per GPU
-AGENTS_PER_GPU=10
+AGENTS_PER_GPU=5
 
 echo "=========================================================="
 echo "    Launching C3M Hyperparameter Sweeps in Background     "

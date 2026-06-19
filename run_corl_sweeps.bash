@@ -4,14 +4,14 @@
 AGENTS_PER_GPU=10
 
 echo "=========================================================="
-echo "    Launching C3M Hyperparameter Sweeps in Background     "
+echo "    Launching CORL Hyperparameter Sweeps in Background    "
 echo "=========================================================="
 
 # ----------------------------------------------------------------------
 # 1. CARTPOLE (GPU 0)
 # ----------------------------------------------------------------------
 echo "Initializing WandB Sweep for 'cartpole'..."
-CARTPOLE_OUT=$(python3 search_c3m.py --count 0 --project C3M-SWEEP-CARTPOLE 2>&1)
+CARTPOLE_OUT=$(python3 search_corl.py --count 0 --project CORL-SWEEP-CARTPOLE 2>&1)
 SWEEP_ID_CARTPOLE=$(echo "$CARTPOLE_OUT" | grep "Created NEW wandb sweep with ID:" | awk '{print $NF}')
 
 if [ -z "$SWEEP_ID_CARTPOLE" ]; then
@@ -23,7 +23,7 @@ echo "✅ CARTPOLE Sweep created with ID: $SWEEP_ID_CARTPOLE"
 
 echo "🚀 Launching $AGENTS_PER_GPU agents for CARTPOLE on GPU 0..."
 for ((i=1; i<=$AGENTS_PER_GPU; i++)); do
-    CUDA_VISIBLE_DEVICES=0 python3 search_c3m.py --sweep_id $SWEEP_ID_CARTPOLE --project C3M-SWEEP-CARTPOLE --task cartpole > log_sweep_c3m_cartpole_gpu0_$i.txt 2>&1 &
+    CUDA_VISIBLE_DEVICES=0 python3 search_corl.py --sweep_id $SWEEP_ID_CARTPOLE --project CORL-SWEEP-CARTPOLE --task cartpole > log_sweep_corl_cartpole_gpu0_$i.txt 2>&1 &
 done
 echo ""
 
@@ -31,7 +31,7 @@ echo ""
 # 2. SEGWAY (GPU 1)
 # ----------------------------------------------------------------------
 echo "Initializing WandB Sweep for 'segway'..."
-SEGWAY_OUT=$(python3 search_c3m.py --count 0 --project C3M-SWEEP-SEGWAY 2>&1)
+SEGWAY_OUT=$(python3 search_corl.py --count 0 --project CORL-SWEEP-SEGWAY 2>&1)
 SWEEP_ID_SEGWAY=$(echo "$SEGWAY_OUT" | grep "Created NEW wandb sweep with ID:" | awk '{print $NF}')
 
 if [ -z "$SWEEP_ID_SEGWAY" ]; then
@@ -43,7 +43,7 @@ echo "✅ SEGWAY Sweep created with ID: $SWEEP_ID_SEGWAY"
 
 echo "🚀 Launching $AGENTS_PER_GPU agents for SEGWAY on GPU 1..."
 for ((i=1; i<=$AGENTS_PER_GPU; i++)); do
-    CUDA_VISIBLE_DEVICES=1 python3 search_c3m.py --sweep_id $SWEEP_ID_SEGWAY --project C3M-SWEEP-SEGWAY --task segway > log_sweep_c3m_segway_gpu1_$i.txt 2>&1 &
+    CUDA_VISIBLE_DEVICES=1 python3 search_corl.py --sweep_id $SWEEP_ID_SEGWAY --project CORL-SWEEP-SEGWAY --task segway > log_sweep_corl_segway_gpu1_$i.txt 2>&1 &
 done
 echo ""
 
@@ -51,7 +51,7 @@ echo ""
 # 3. CAR (GPU 2)
 # ----------------------------------------------------------------------
 echo "Initializing WandB Sweep for 'car'..."
-CAR_OUT=$(python3 search_c3m.py --count 0 --project C3M-SWEEP-CAR 2>&1)
+CAR_OUT=$(python3 search_corl.py --count 0 --project CORL-SWEEP-CAR 2>&1)
 SWEEP_ID_CAR=$(echo "$CAR_OUT" | grep "Created NEW wandb sweep with ID:" | awk '{print $NF}')
 
 if [ -z "$SWEEP_ID_CAR" ]; then
@@ -63,7 +63,7 @@ echo "✅ CAR Sweep created with ID: $SWEEP_ID_CAR"
 
 echo "🚀 Launching $AGENTS_PER_GPU agents for CAR on GPU 2..."
 for ((i=1; i<=$AGENTS_PER_GPU; i++)); do
-    CUDA_VISIBLE_DEVICES=2 python3 search_c3m.py --sweep_id $SWEEP_ID_CAR --project C3M-SWEEP-CAR --task car > log_sweep_c3m_car_gpu2_$i.txt 2>&1 &
+    CUDA_VISIBLE_DEVICES=2 python3 search_corl.py --sweep_id $SWEEP_ID_CAR --project CORL-SWEEP-CAR --task car > log_sweep_corl_car_gpu2_$i.txt 2>&1 &
 done
 echo ""
 
@@ -71,7 +71,7 @@ echo ""
 # 4. TURTLEBOT (GPU 3)
 # ----------------------------------------------------------------------
 echo "Initializing WandB Sweep for 'turtlebot'..."
-TURTLEBOT_OUT=$(python3 search_c3m.py --count 0 --project C3M-SWEEP-TURTLEBOT 2>&1)
+TURTLEBOT_OUT=$(python3 search_corl.py --count 0 --project CORL-SWEEP-TURTLEBOT 2>&1)
 SWEEP_ID_TURTLEBOT=$(echo "$TURTLEBOT_OUT" | grep "Created NEW wandb sweep with ID:" | awk '{print $NF}')
 
 if [ -z "$SWEEP_ID_TURTLEBOT" ]; then
@@ -83,14 +83,14 @@ echo "✅ TURTLEBOT Sweep created with ID: $SWEEP_ID_TURTLEBOT"
 
 echo "🚀 Launching $AGENTS_PER_GPU agents for TURTLEBOT on GPU 3..."
 for ((i=1; i<=$AGENTS_PER_GPU; i++)); do
-    CUDA_VISIBLE_DEVICES=3 python3 search_c3m.py --sweep_id $SWEEP_ID_TURTLEBOT --project C3M-SWEEP-TURTLEBOT --task turtlebot > log_sweep_c3m_turtlebot_gpu3_$i.txt 2>&1 &
+    CUDA_VISIBLE_DEVICES=3 python3 search_corl.py --sweep_id $SWEEP_ID_TURTLEBOT --project CORL-SWEEP-TURTLEBOT --task turtlebot > log_sweep_corl_turtlebot_gpu3_$i.txt 2>&1 &
 done
 echo ""
 
 echo "=========================================================="
 echo "🎉 All agents successfully deployed to the background! "
-echo "   - CARTPOLE logs  : log_sweep_c3m_cartpole_gpu0_X.txt"
-echo "   - SEGWAY logs    : log_sweep_c3m_segway_gpu1_X.txt"
-echo "   - CAR logs       : log_sweep_c3m_car_gpu2_X.txt"
-echo "   - TURTLEBOT logs : log_sweep_c3m_turtlebot_gpu3_X.txt"
+echo "   - CARTPOLE logs  : log_sweep_corl_cartpole_gpu0_X.txt"
+echo "   - SEGWAY logs    : log_sweep_corl_segway_gpu1_X.txt"
+echo "   - CAR logs       : log_sweep_corl_car_gpu2_X.txt"
+echo "   - TURTLEBOT logs : log_sweep_corl_turtlebot_gpu3_X.txt"
 echo "=========================================================="

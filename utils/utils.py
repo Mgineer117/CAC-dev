@@ -50,6 +50,9 @@ def get_env(args):
     env.lbd = args.lbd
     env.gamma = args.gamma
 
+    if getattr(args, "control_scaler", None) is not None:
+        env.control_scaler = args.control_scaler
+
     args.state_dim = env.observation_space.shape[0]
     args.x_dim = env.num_dim_x
     args.u_dim = env.action_space.shape[0]

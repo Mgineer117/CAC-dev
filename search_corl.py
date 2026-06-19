@@ -2,6 +2,8 @@ import datetime
 import random
 import uuid
 import wandb
+import sys
+import argparse
 import torch
 
 from utils.get_args import get_args
@@ -49,11 +51,11 @@ def train():
     # We set num_runs to 1 as we only want one execution per sweep combination
     args.num_runs = 1
     
-    # Force algorithm to carl
-    args.algo_name = "carl"
+    # Force algorithm to corl
+    args.algo_name = "corl"
     
     print(f"-------------------------------------------------------")
-    print(f"      CARL Sweep Trial ID: {unique_id}")
+    print(f"      CORL Sweep Trial ID: {unique_id}")
     print(f"      Seed: {seed}")
     print(f"      Time Begun: {exp_time}")
     print(f"-------------------------------------------------------")
@@ -64,20 +66,17 @@ def train():
     else:
         run(args, seed, unique_id, exp_time)
 
-import sys
-import argparse
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="WandB Sweep Launcher for CARL")
+    parser = argparse.ArgumentParser(description="WandB Sweep Launcher for CORL")
     parser.add_argument("--sweep_id", type=str, default=None, help="WandB sweep ID to join")
     parser.add_argument("--count", type=int, default=100, help="Number of trials to run")
-    parser.add_argument("--project", type=str, default="CARL-SWEEP", help="WandB project name")
+    parser.add_argument("--project", type=str, default="CORL-SWEEP", help="WandB project name")
     
     # Parse only known search-specific args
     search_args, remaining_args = parser.parse_known_args()
     
     # Overwrite sys.argv so get_args() in train() doesn't fail on unknown args
-    sys.argv = [sys.argv[0]] + remaining_args + ["--algo-name", "carl"]
+    sys.argv = [sys.argv[0]] + remaining_args + ["--algo-name", "corl"]
 
     torch.set_default_dtype(torch.float32)
 
@@ -136,7 +135,7 @@ if __name__ == "__main__":
         print(f"\n=======================================================")
         print(f"Created NEW wandb sweep with ID: {sweep_id}")
         print(f"To run additional agents in parallel, run:")
-        print(f"python search_carl.py --sweep_id {sweep_id}")
+        print(f"python search_corl.py --sweep_id {sweep_id}")
         print(f"=======================================================\n")
         
         if search_args.count == 0:

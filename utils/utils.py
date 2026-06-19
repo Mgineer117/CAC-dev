@@ -12,6 +12,7 @@ from envs import (
     SegwayEnv,
     TurtlebotEnv,
 )
+from policy import C3M, CARL, CORL, LQR, NCM, PPO, SD_LQR
 from policy.cpo import CPO
 from policy.layers.CMG_networks import CCM_Generator
 from policy.layers.policy_networks import (
@@ -60,9 +61,6 @@ def get_env(args):
     args.episode_len = env.episode_len
 
     return env
-
-
-from policy import C3M, CARL, CORL, LQR, NCM, PPO, SD_LQR
 
 
 def _create_actor_critic(args):
@@ -162,7 +160,7 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             target_kl=args.target_kl,
             gamma=gamma,
             gae=args.gae,
-            K=args.K_epochs,
+            K=args.k_epochs,
             nupdates=nupdates,
             device=args.device,
         )
@@ -214,11 +212,26 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             num_minibatch=args.num_minibatch,
             minibatch_size=args.minibatch_size,
             nupdates=args.c3m_epochs,
+            # optional SD-LQR CMG pretraining (the CORL recipe); reuses the corl-* args
+            pretrain_cmg=args.c3m_pretrain_cmg,
+            SDC_func=SDC_func,
+            Q_scaler=args.Q_scaler,
+            R_scaler=args.R_scaler,
+            pretrain_epochs=args.corl_pretrain_epochs,
+            pretrain_buffer_size=args.corl_pretrain_buffer_size,
+            pretrain_minibatch_size=args.corl_pretrain_minibatch_size,
+            pretrain_W_lr=args.corl_pretrain_W_lr,
+            val_split=args.corl_val_split,
+            val_interval=args.corl_val_interval,
+            plateau_tol=args.corl_plateau_tol,
+            plateau_patience=args.corl_plateau_patience,
+            logger=logger,
+            writer=writer,
             device=args.device,
         )
 
     elif algo == "carl":
-        CMG = _create_cmg(args, mode=args.CMG_mode, device=args.device)
+        CMG = _create_cmg(args, mode=args.cmg_mode, device=args.device)
         actor, critic = _create_actor_critic(args)
         data = env.get_rollout(args.c3m_buffer_size, mode="c3m")
 
@@ -235,7 +248,7 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             critic_lr=args.critic_lr,
             num_minibatch=args.num_minibatch,
             minibatch_size=args.minibatch_size,
-            disable_CMG_training=args.disable_CMG_training,  # Note the inversion here
+            disable_CMG_training=args.disable_cmg_training,  # Note the inversion here
             w_ub=args.w_ub,
             w_lb=args.w_lb,
             lbd=args.lbd,
@@ -250,7 +263,7 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             num_windows=args.num_windows,
             gamma=gamma,
             gae=args.gae,
-            K=args.K_epochs,
+            K=args.k_epochs,
             nupdates=nupdates,
             policy_updates_per_cmg_update=args.policy_updates_per_cmg_update,
             device=args.device,
@@ -287,7 +300,7 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
         )
 
     elif algo == "corl":
-        CMG = _create_cmg(args, mode=args.CMG_mode, device=args.device)
+        CMG = _create_cmg(args, mode=args.cmg_mode, device=args.device)
         actor, critic = _create_actor_critic(args)
         data = env.get_rollout(args.c3m_buffer_size, mode="c3m")
 
@@ -328,7 +341,7 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             num_windows=args.num_windows,
             gamma=gamma,
             gae=args.gae,
-            K=args.K_epochs,
+            K=args.k_epochs,
             nupdates=nupdates,
             policy_updates_per_cmg_update=args.policy_updates_per_cmg_update,
             logger=logger,
@@ -337,7 +350,7 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
         )
 
     elif algo == "cpo":
-        CMG = _create_cmg(args, mode=args.CMG_mode, device=args.device)
+        CMG = _create_cmg(args, mode=args.cmg_mode, device=args.device)
         actor, critic = _create_actor_critic(args)
         data = env.get_rollout(args.c3m_buffer_size, mode="c3m")
 

@@ -398,8 +398,8 @@ def run(args, seed, unique_id, exp_time):
         get_f_and_B = DynamicLearner(
             x_dim=eval_env.num_dim_x,
             action_dim=args.action_dim,
-            hidden_dim=args.DynamicLearner_dim,
-            Dynamic_lr=args.Dynamic_lr,
+            hidden_dim=args.dynamic_dim,
+            Dynamic_lr=args.dynamic_lr,
             drop_out=0.0,
             nupdates=args.dynamics_epochs,
             device=args.device,
@@ -414,7 +414,7 @@ def run(args, seed, unique_id, exp_time):
             SDC_func = SDCLearner(
                 x_dim=eval_env.num_dim_x,
                 a_dim=args.action_dim,
-                hidden_dim=args.SDCLearner_dim,
+                hidden_dim=args.sdc_dim,
                 get_f_and_B=get_f_and_B,
                 nupdates=args.sdc_epochs,
                 device=args.device,

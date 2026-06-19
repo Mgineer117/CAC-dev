@@ -4,11 +4,15 @@ from trainer.offline_trainer import SDCTrainer
 def get_SDC(env, args, logger, writer, get_f_and_B, init_epochs):
     
 
-    if args.algo_name in ("sd-lqr", "sd-lqr-approx", "corl"):
+    # C3M needs the SDC decomposition network too when CMG pretraining is enabled.
+    needs_sdc = args.algo_name in ("sd-lqr", "sd-lqr-approx", "corl") or (
+        args.algo_name == "c3m" and getattr(args, "c3m_pretrain_cmg", False)
+    )
+    if needs_sdc:
         SDC_func = SDCLearner(
             x_dim=env.num_dim_x,
             a_dim=args.action_dim,
-            hidden_dim=args.SDCLearner_dim,
+            hidden_dim=args.sdc_dim,
             get_f_and_B=get_f_and_B,
             nupdates=args.sdc_epochs,
             device=args.device,
@@ -27,7 +31,6 @@ def get_SDC(env, args, logger, writer, get_f_and_B, init_epochs):
         SDC_trainer.train()
         init_epochs = init_epochs + args.sdc_epochs
     else:
-        init_epochs = init_epochs
         SDC_func = None
 
     return SDC_func, init_epochs

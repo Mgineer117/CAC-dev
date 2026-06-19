@@ -1,5 +1,5 @@
 {
     "policy_mode": "deterministic",
-    "CMG_mode": "deterministic",
+    "cmg_mode": "deterministic",
     "num_windows": 1
 }

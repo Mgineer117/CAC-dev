@@ -51,9 +51,13 @@ class Utilities(nn.Module):
                             state[k] = v.to(device)
 
     def get_matrix_eig(self, A: torch.Tensor):
-        """Calculates and returns the mean eigenvalues of a symmetric matrix."""
+        """Returns mean eigenvalues of a symmetric matrix, or NaN on failure."""
         with torch.no_grad():
-            eigvals = torch.linalg.eigvalsh(A)  # (batch, dim), real symmetric
+            A_sym = 0.5 * (A + A.transpose(-1, -2))  # guard against floating-point asymmetry
+            try:
+                eigvals = torch.linalg.eigvalsh(A_sym)
+            except torch.linalg.LinAlgError:
+                eigvals = torch.full(A_sym.shape[:-1], float("nan"), device=A.device)
         return eigvals.mean(0).cpu().numpy()
 
     def average_dict_values(self, dict_list):

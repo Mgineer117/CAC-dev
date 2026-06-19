@@ -17,8 +17,8 @@ def get_dynamics(env, args, logger, writer):
         Dynamic_func = DynamicLearner(
             x_dim=env.num_dim_x,
             action_dim=args.action_dim,
-            hidden_dim=args.DynamicLearner_dim,
-            Dynamic_lr=args.Dynamic_lr,
+            hidden_dim=args.dynamic_dim,
+            Dynamic_lr=args.dynamic_lr,
             drop_out=0.1,  # to prevent overfit
             nupdates=args.dynamics_epochs,
             device=args.device,

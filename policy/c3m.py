@@ -9,9 +9,10 @@ from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
 from policy.base import Base
+from policy.cmg_pretrain import SDLQRPretrainMixin
 
 
-class C3M(Base):
+class C3M(SDLQRPretrainMixin, Base):
     def __init__(
         self,
         x_dim: int,
@@ -32,6 +33,25 @@ class C3M(Base):
         minibatch_size: int = 256,
         nupdates: int = 1,
         warmup_epochs: int = 0,
+        # --- optional SD-LQR CMG pretraining (the CORL recipe) ---
+        pretrain_cmg: bool = False,
+        SDC_func: nn.Module = None,
+        Q_scaler: float = 1.0,
+        R_scaler: float = 0.0,
+        pretrain_epochs: int = 5000,
+        pretrain_buffer_size: int = 10000,
+        pretrain_minibatch_size: int = 1024,
+        pretrain_log_interval: int = 100,
+        pretrain_W_lr: float = 1e-3,
+        val_split: float = 0.1,
+        val_batch_size: int = 512,
+        val_interval: int = 25,
+        plateau_window: int = 5,
+        plateau_tol: float = 1e-3,
+        plateau_patience: int = 3,
+        restore_best: bool = True,
+        logger=None,
+        writer=None,
         device: str = "cpu",
     ):
         super(C3M, self).__init__()
@@ -85,6 +105,52 @@ class C3M(Base):
         self.warmup_epochs = warmup_epochs
         if self.warmup_epochs > 0:
             self.warmup_W()
+
+        # === OPTIONAL: SD-LQR CMG PRETRAINING (the CORL recipe) === #
+        # Warm-starts the contraction metric by minimizing only the contraction loss
+        # against SD-LQR controls (no c1/c2). Unlike CORL we keep the CMG trainable
+        # afterwards, so the joint C3M objective refines it from the pretrained init.
+        self.pretrain_cmg = pretrain_cmg
+        if self.pretrain_cmg:
+            if SDC_func is None:
+                raise ValueError(
+                    "C3M CMG pretraining requires a trained SDC_func (set --c3m-pretrain-cmg "
+                    "so the SDC decomposition network is learned first)."
+                )
+
+            # SD-LQR ingredients + contraction constants used by the pretrain loss.
+            self.SDC_func = SDC_func.eval()
+            self.Q_scaler = Q_scaler
+            self.R_scaler = R_scaler
+            self.W_entropy_scaler = 0.0  # deterministic CMG -> no entropy term
+
+            # pretraining configuration
+            self.pretrain_epochs = pretrain_epochs
+            self.pretrain_buffer_size = pretrain_buffer_size
+            self.pretrain_minibatch_size = pretrain_minibatch_size
+            self.pretrain_log_interval = pretrain_log_interval
+            self.pretrain_W_lr = pretrain_W_lr
+
+            # early stopping: validation total-loss, plateau-slope rule, restore best
+            self.val_split = val_split
+            self.val_batch_size = val_batch_size
+            self.val_interval = val_interval
+            self.plateau_window = plateau_window
+            self.plateau_tol = plateau_tol
+            self.plateau_patience = plateau_patience
+            self.restore_best = restore_best
+
+            self.logger = logger
+            self.writer = writer
+
+            # Pretrain only the CMG with a dedicated optimizer, then keep it trainable
+            # (the shared self.optimizer continues to refine it during C3M training).
+            self.cmg_pretrain_optimizer = torch.optim.Adam(
+                self.CMG.parameters(), lr=pretrain_W_lr
+            )
+            self.freeze_cmg_after_pretrain = False
+
+            self.pretrain_CMG()
 
     def lr_lambda(self, step):
         return 1.0 - float(step) / float(self.nupdates)

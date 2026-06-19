@@ -104,6 +104,82 @@ def get_args():
         default=5,
         help="Number of policy updates per CMG update.",
     )
+    # --- NCM / CV-STEM (Tsukamoto, exact convex SDP) ---
+    parser.add_argument(
+        "--cvstem-alpha",
+        type=float,
+        default=None,
+        help="NCM: CV-STEM contraction rate alpha (defaults to --lbd; only used "
+        "when --cvstem-no-linesearch is set).",
+    )
+    parser.add_argument(
+        "--ncm-R-scaler",
+        type=float,
+        default=1.0,
+        help="NCM: control weight R = R_scaler*I for the u = u* - R^-1 B^T M e law.",
+    )
+    parser.add_argument(
+        "--cvstem-dt",
+        type=float,
+        default=None,
+        help="NCM: dt used in the CV-STEM (W-I)/dt term (defaults to env.dt). A "
+        "larger value relaxes the time-derivative bound.",
+    )
+    parser.add_argument(
+        "--cvstem-w-nu",
+        type=float,
+        default=1.0,
+        help="NCM: weight on nu (control authority) in the CV-STEM objective.",
+    )
+    parser.add_argument(
+        "--cvstem-num-samples",
+        type=int,
+        default=100,
+        help="NCM: number of states in the joint CV-STEM SDP (kept modest; the "
+        "NCM network interpolates between them).",
+    )
+    parser.add_argument(
+        "--cvstem-no-linesearch",
+        action="store_true",
+        help="NCM: disable the alpha line search and use --cvstem-alpha / --lbd.",
+    )
+    parser.add_argument(
+        "--cvstem-no-dwdt",
+        action="store_true",
+        help="NCM: drop the (W-I)/dt term (steady-state / constant-metric CV-STEM; "
+        "better conditioned when dt is tiny).",
+    )
+    # --- CORL (SD-LQR pretrained CMG) ---
+    parser.add_argument(
+        "--Q-scaler",
+        type=float,
+        default=1.0,
+        help="CORL: state cost scaler for the SD-LQR Riccati equation.",
+    )
+    parser.add_argument(
+        "--R-scaler",
+        type=float,
+        default=0.0,
+        help="CORL: control cost scaler for the SD-LQR Riccati equation.",
+    )
+    parser.add_argument(
+        "--corl-pretrain-epochs",
+        type=int,
+        default=30000,
+        help="CORL: number of CMG pretraining epochs (contraction loss only).",
+    )
+    parser.add_argument(
+        "--corl-pretrain-buffer-size",
+        type=int,
+        default=10000,
+        help="CORL: number of states for which SD-LQR controls are precomputed.",
+    )
+    parser.add_argument(
+        "--corl-pretrain-minibatch-size",
+        type=int,
+        default=1024,
+        help="CORL: minibatch size used during CMG pretraining.",
+    )
     parser.add_argument(
         "--DynamicLearner-dim",
         type=list,
@@ -130,6 +206,12 @@ def get_args():
     )
     parser.add_argument(
         "--actor-dim", type=list, default=[64, 64], help="actor hidden layers."
+    )
+    parser.add_argument(
+        "--actor-activation",
+        type=str,
+        default="tanh",
+        help="actor activation ['tanh', 'relu', 'elu', 'leaky_relu', 'gelu'].",
     )
     parser.add_argument(
         "--critic-dim", type=list, default=[256, 256], help="critic hidden layers."

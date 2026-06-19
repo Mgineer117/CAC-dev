@@ -1,0 +1,9 @@
+{
+    "policy_mode": "stochastic",
+    "anneal_stddev": false,
+    "CMG_mode": "deterministic",
+    "W_entropy_scaler": 0.001,
+    "num_windows": 1,
+    "policy_type": "CL",
+    "reward_mode": "default"
+}

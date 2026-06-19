@@ -4,7 +4,7 @@ from trainer.offline_trainer import SDCTrainer
 def get_SDC(env, args, logger, writer, get_f_and_B, init_epochs):
     
 
-    if args.algo_name in ("sd-lqr", "sd-lqr-approx"):
+    if args.algo_name in ("sd-lqr", "sd-lqr-approx", "corl"):
         SDC_func = SDCLearner(
             x_dim=env.num_dim_x,
             a_dim=args.action_dim,

@@ -194,10 +194,12 @@ class Evaluator:
             rew_list = [ep_info["return"] for ep_info in ep_buffer]
             ctr_list = [ep_info["avg_ctrl_effort"] for ep_info in ep_buffer]
             mauc_list = [ep_info["mauc"] for ep_info in ep_buffer]
+            inf_list = [ep_info["avg_inf_time"] for ep_info in ep_buffer]
 
             ret_mean, _ = self.mean_confidence_interval(rew_list)
             mauc_mean, _ = self.mean_confidence_interval(mauc_list)
             ctrl_mean, _ = self.mean_confidence_interval(ctr_list)
+            inf_mean, _ = self.mean_confidence_interval(inf_list)
 
             C, lbd = self.compute_contraction_rate(error_traj)
             gamma = getattr(self.policy, "gamma", 1.0)
@@ -207,23 +209,40 @@ class Evaluator:
                 fig = self.plot_trajectories(track_traj, error_traj, dimension, C, lbd)
 
             #
-            ep_buffers.append(
-                {
-                    "return": ret_mean,
-                    "avg_ctrl_effort": ctrl_mean,
-                    "mauc": mauc_mean,
-                    "overshoot": C,
-                    "contraction_rate": lbd,
-                    "N": N_mean,
-                    "C_gamma_N": C_gamma_N_mean,
-                    "C_gamma_inf": C_gamma_inf_mean,
-                }
+            ep_buffer_entry = {
+                "return": ret_mean,
+                "avg_ctrl_effort": ctrl_mean,
+                "mauc": mauc_mean,
+                "avg_inf_time": inf_mean,
+                "overshoot": C,
+                "contraction_rate": lbd,
+                "N": N_mean,
+                "C_gamma_N": C_gamma_N_mean,
+                "C_gamma_inf": C_gamma_inf_mean,
+            }
+
+            # CORL: certify how the SD-LQR (imperfect) control satisfies the
+            # value-contraction lemma along the discounted cost-to-go.
+            policy_name = (
+                self.policy.__class__.__name__.lower()
+                if hasattr(self, "policy")
+                else ""
             )
+            if policy_name == "corl":
+                design_lbd = getattr(self.policy, "lbd", lbd)
+                ep_buffer_entry.update(
+                    self.compute_value_contraction_metrics(
+                        error_traj, gamma, design_lbd
+                    )
+                )
+
+            ep_buffers.append(ep_buffer_entry)
 
         # === eval num level logging === #
         rew_list = [ep_info["return"] for ep_info in ep_buffers]
         ctr_list = [ep_info["avg_ctrl_effort"] for ep_info in ep_buffers]
         mauc_list = [ep_info["mauc"] for ep_info in ep_buffers]
+        inf_list = [ep_info["avg_inf_time"] for ep_info in ep_buffers]
         overshoot_list = [ep_info["overshoot"] for ep_info in ep_buffers]
         lbd_list = [ep_info["contraction_rate"] for ep_info in ep_buffers]
         N_list = [ep_info["N"] for ep_info in ep_buffers]
@@ -233,6 +252,7 @@ class Evaluator:
         ret_mean, _ = self.mean_confidence_interval(rew_list)
         mauc_mean, _ = self.mean_confidence_interval(mauc_list)
         ctrl_mean, _ = self.mean_confidence_interval(ctr_list)
+        inf_mean_total, _ = self.mean_confidence_interval(inf_list)
         overshoot_mean, _ = self.mean_confidence_interval(overshoot_list)
         lbd_mean, _ = self.mean_confidence_interval(lbd_list)
         N_mean_total, _ = self.mean_confidence_interval(N_list)
@@ -243,6 +263,8 @@ class Evaluator:
             "eval/return": ret_mean,
             "eval/mauc": mauc_mean,
             "eval/control_effort": ctrl_mean,
+            "eval/inference_time_s": inf_mean_total,
+            "eval/inference_time_ms": inf_mean_total * 1e3,
             "eval/overshoot": overshoot_mean,
             "eval/contraction_rate": lbd_mean,
             "eval/N": N_mean_total,
@@ -258,6 +280,22 @@ class Evaluator:
 
         if not np.isnan(C_gamma_N_mean_total):
             eval_dict["eval/C_gamma_N"] = C_gamma_N_mean_total
+
+        # CORL value-contraction certification metrics (aggregated over references).
+        if self.policy.__class__.__name__.lower() == "corl":
+            vc_keys = [
+                "vc_rate_min",
+                "vc_rate_max",
+                "vc_rate_avg",
+                "vc_rate_p95",
+                "vc_rate_guaranteed_95",
+                "vc_violation_rate",
+                "vc_violation_magnitude",
+            ]
+            for key in vc_keys:
+                vals = [b[key] for b in ep_buffers if key in b and not np.isnan(b[key])]
+                if len(vals) > 0:
+                    eval_dict[f"eval/{key}"], _ = self.mean_confidence_interval(vals)
 
         supp_dict = {f"eval/path_tracking_result": fig}
         if self.rendering and len(video_frames) > 0:
@@ -352,7 +390,7 @@ class Evaluator:
                 eigvals = np.linalg.eigvals(M)
                 if np.min(np.real(eigvals)) > 0:
                     factor = np.sqrt(np.max(np.real(eigvals)) / np.min(np.real(eigvals)))
-        elif policy_name in ["carl", "trpo", "cpo", "ppo", "cac"]:
+        elif policy_name in ["carl", "corl", "trpo", "cpo", "ppo", "cac"]:
             if hasattr(self.policy, "CMG") and hasattr(self.eval_env, "x_0"):
                 import torch
                 x0 = torch.tensor(self.eval_env.x_0, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
@@ -395,6 +433,93 @@ class Evaluator:
             N_list.append(N)
             
         return np.nanmean(N_list), np.nanmean(c_gamma_N_list), np.nanmean(c_gamma_inf_list)
+
+    def compute_value_contraction_metrics(
+        self,
+        error_trajectories: list[list[float]],
+        gamma: float,
+        lbd: float,
+    ):
+        """Certify the value-contraction lemma along the discounted cost-to-go.
+
+        For each state s_k along a trajectory we form the discounted cost value
+        function V_C(s_k) = sum_{j>=k} gamma^{j-k} c(s_j), with stage cost c equal
+        to the (normalized) tracking error. The lemma claims
+
+            V_C(s_k) <= exp(-2 * lbd_bar(0,k) * k * dt) * V_C(s_0).
+
+        Using the design rate lbd as a surrogate for the running-mean rate
+        lbd_bar(0,k), we report:
+          - the empirical contraction rate  lbd_emp(k) = -ln(V_C(s_k)/V_C(s_0)) / (2 k dt)
+            summarized as min / max / avg / 95th percentile,
+          - vc_rate_guaranteed_95: the 5th percentile rate (the rate met or
+            exceeded by 95% of states -- a certified rate for 95% of states),
+          - vc_violation_rate: fraction of states where the imperfect SD-LQR
+            control violates the lemma bound (V_C decays slower than guaranteed),
+          - vc_violation_magnitude: mean V_C(s_k) / bound over violating states.
+        """
+        dt = self.eval_env.dt
+        eps = 1e-8
+
+        rates = []
+        violations = []
+        magnitudes = []
+
+        for ep_err in error_trajectories:
+            T = len(ep_err)
+            if T < 2:
+                continue
+
+            # Discounted cost-to-go V_C(s_k) for each k (stage cost = tracking error).
+            V = np.zeros(T, dtype=np.float64)
+            running = 0.0
+            for k in range(T - 1, -1, -1):
+                running = ep_err[k] + gamma * running
+                V[k] = running
+
+            V0 = V[0]
+            if V0 <= eps:
+                continue
+
+            for k in range(1, T):
+                if V[k] <= eps:
+                    # cost-to-go effectively zero -> treat as fully contracted
+                    continue
+                ratio = V[k] / V0
+                t = k * dt
+                lbd_emp = -np.log(ratio) / (2.0 * t)
+                rates.append(lbd_emp)
+
+                bound = np.exp(-2.0 * lbd * t) * V0
+                is_violation = V[k] > bound
+                violations.append(1.0 if is_violation else 0.0)
+                if is_violation and bound > eps:
+                    magnitudes.append(V[k] / bound)
+
+        if len(rates) == 0:
+            nan = float("nan")
+            return {
+                "vc_rate_min": nan,
+                "vc_rate_max": nan,
+                "vc_rate_avg": nan,
+                "vc_rate_p95": nan,
+                "vc_rate_guaranteed_95": nan,
+                "vc_violation_rate": nan,
+                "vc_violation_magnitude": nan,
+            }
+
+        rates = np.asarray(rates)
+        return {
+            "vc_rate_min": float(np.min(rates)),
+            "vc_rate_max": float(np.max(rates)),
+            "vc_rate_avg": float(np.mean(rates)),
+            "vc_rate_p95": float(np.percentile(rates, 95)),
+            "vc_rate_guaranteed_95": float(np.percentile(rates, 5)),
+            "vc_violation_rate": float(np.mean(violations)),
+            "vc_violation_magnitude": (
+                float(np.mean(magnitudes)) if len(magnitudes) > 0 else 0.0
+            ),
+        }
 
     def mean_confidence_interval(self, data, confidence=0.95):
         n = len(data)

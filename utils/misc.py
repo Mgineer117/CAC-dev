@@ -111,6 +111,54 @@ def override_args(init_args):
     return args
 
 
+# --- Architecture sweep helpers (shared by the search_*.py launchers) --------- #
+# Uniform-width hidden layers: hidden_dims = [width] * depth.
+ARCH_WIDTHS = [64, 128, 256, 512, 1024]
+ARCH_DEPTHS = [1, 2, 3, 4]
+
+
+def arch_sweep_parameters(include_cmg: bool = True, include_actor: bool = True) -> dict:
+    """Returns wandb-sweep parameter entries for CMG / actor architecture search.
+
+    Width and depth are swept separately (not as a giant list-of-lists) so the
+    optimizer sees clean categorical dimensions; hidden_dims = [width] * depth is
+    reconstructed in apply_arch_config().
+    """
+    params = {}
+    if include_cmg:
+        params["cmg_width"] = {"values": ARCH_WIDTHS}
+        params["cmg_depth"] = {"values": ARCH_DEPTHS}
+        params["cmg_activation"] = {"values": ["tanh", "relu", "siren"]}
+    if include_actor:
+        params["actor_width"] = {"values": ARCH_WIDTHS}
+        params["actor_depth"] = {"values": ARCH_DEPTHS}
+        params["actor_activation"] = {"values": ["tanh", "relu", "elu"]}
+    return params
+
+
+def apply_arch_config(args, config) -> None:
+    """Applies CMG / actor architecture sweep values from a wandb config to args.
+
+    Accepts either the (width, depth) form produced by arch_sweep_parameters() or
+    an explicit hidden-dims list (cmg_hidden_dims / actor_dim).
+    """
+    # CMG
+    if "cmg_width" in config and "cmg_depth" in config:
+        args.cmg_hidden_dims = [int(config.cmg_width)] * int(config.cmg_depth)
+    elif "cmg_hidden_dims" in config:
+        args.cmg_hidden_dims = list(config.cmg_hidden_dims)
+    if "cmg_activation" in config:
+        args.cmg_activation = config.cmg_activation
+
+    # Actor
+    if "actor_width" in config and "actor_depth" in config:
+        args.actor_dim = [int(config.actor_width)] * int(config.actor_depth)
+    elif "actor_dim" in config:
+        args.actor_dim = list(config.actor_dim)
+    if "actor_activation" in config:
+        args.actor_activation = config.actor_activation
+
+
 def load_hyperparams(file_path):
     """Load hyperparameters for a specific environment from a JSON file."""
     try:

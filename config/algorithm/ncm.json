@@ -1,0 +1,5 @@
+{
+    "CMG_mode": "deterministic",
+    "cmg_activation": "relu",
+    "num_windows": 1
+}

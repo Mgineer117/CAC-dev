@@ -8,7 +8,30 @@ from torch.distributions import Categorical, Normal
 from policy.layers.building_blocks import MLP
 
 
-def get_u_model(x_dim: int, u_dim: int):
+def get_activation(activation):
+    """Resolves an activation given either an nn.Module or a string name."""
+    if isinstance(activation, nn.Module):
+        return activation
+    name = str(activation).lower()
+    table = {
+        "tanh": nn.Tanh(),
+        "relu": nn.ReLU(),
+        "leaky_relu": nn.LeakyReLU(),
+        "elu": nn.ELU(),
+        "softplus": nn.Softplus(),
+        "gelu": nn.GELU(),
+    }
+    if name not in table:
+        raise ValueError(f"Unknown actor activation: {activation}")
+    return table[name]
+
+
+def get_u_model(
+    x_dim: int,
+    u_dim: int,
+    hidden_dims: list = None,
+    activation=nn.Tanh(),
+):
     """
     Constructs two neural networks (w1 and w2) that generate dynamic weight matrices
     based on the trimmed current and reference states. These networks are task-agnostic
@@ -17,29 +40,27 @@ def get_u_model(x_dim: int, u_dim: int):
     Args:
         x_dim (int): Full state dimension.
         u_dim (int): Dimension of the action space.
+        hidden_dims (list): Hidden layer widths of the weight-generator MLPs.
+        activation: Activation (nn.Module or name) used inside the generators.
 
     Returns:
-        w1 (nn.Sequential): Network mapping input to a flattened tensor of shape (c * x_dim),
-                            later reshaped to (c, x_dim) for transforming the error vector.
-        w2 (nn.Sequential): Network mapping input to a flattened tensor of shape (c * u_dim),
-                            later reshaped to (u_dim, c) to map the transformed error to control.
+        w1 (nn.Module): Network mapping input to a flattened tensor of shape (c * x_dim),
+                        later reshaped to (c, x_dim) for transforming the error vector.
+        w2 (nn.Module): Network mapping input to a flattened tensor of shape (c * u_dim),
+                        later reshaped to (u_dim, c) to map the transformed error to control.
     """
+    if hidden_dims is None:
+        hidden_dims = [128]
+    activation = get_activation(activation)
+
     input_dim = 2 * x_dim  # Concatenated trimmed x and x_ref
     c = 3 * x_dim  # Intermediate dimension multiplier
 
     # First weight generator (for projecting error vector to latent space)
-    w1 = torch.nn.Sequential(
-        torch.nn.Linear(input_dim, 128, bias=True),
-        torch.nn.Tanh(),
-        torch.nn.Linear(128, c * x_dim, bias=True),
-    )
+    w1 = MLP(input_dim, list(hidden_dims), c * x_dim, activation=activation)
 
     # Second weight generator (for projecting latent to action space)
-    w2 = torch.nn.Sequential(
-        torch.nn.Linear(input_dim, 128, bias=True),
-        torch.nn.Tanh(),
-        torch.nn.Linear(128, c * u_dim, bias=True),
-    )
+    w2 = MLP(input_dim, list(hidden_dims), c * u_dim, activation=activation)
 
     return w1, w2
 
@@ -361,6 +382,8 @@ class CLActor(BaseActor):
         mode: str = "deterministic",
         num_windows: int = 1,
         anneal_stddev: bool = False,
+        hidden_dim: list = None,
+        activation=nn.Tanh(),
     ):
         """
         Initialize the control model.
@@ -370,6 +393,8 @@ class CLActor(BaseActor):
             state_dim (int): Total dimension of the combined state vector.
             u_dim (int): Dimension of the control/action vector u.
             mode (str): Mode of operation, either "deterministic" or "stochastic".
+            hidden_dim (list): Hidden widths of the weight-generator MLPs.
+            activation: Activation (nn.Module or name) for the generators.
         """
         super().__init__()
 
@@ -385,7 +410,9 @@ class CLActor(BaseActor):
         self.num_windows = num_windows
 
         # Obtain task-specific neural networks that generate weight matrices
-        self.w1, self.w2 = get_u_model(x_dim, u_dim)
+        self.w1, self.w2 = get_u_model(
+            x_dim, u_dim, hidden_dims=hidden_dim, activation=activation
+        )
         self.init_logstd = torch.zeros(1, u_dim)
 
         #
@@ -480,13 +507,18 @@ class RLActor(BaseActor):
         hidden_dim: list,
         mode: str = "deterministic",
         anneal_stddev: bool = False,
+        activation=nn.Tanh(),
     ):
         super().__init__()
         self.x_dim, self.u_dim = x_dim, u_dim
         input_dim = 2 * x_dim + u_dim  # Concatenated x and x_ref
         # Initialize the model: MLP that outputs controls
         self.model = MLP(
-            input_dim, hidden_dim, u_dim, activation=nn.Tanh(), initialization="actor"
+            input_dim,
+            hidden_dim,
+            u_dim,
+            activation=get_activation(activation),
+            initialization="actor",
         )
         self.init_logstd = torch.zeros(1, u_dim)
 

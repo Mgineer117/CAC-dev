@@ -53,16 +53,18 @@ def get_env(args):
     args.state_dim = env.observation_space.shape[0]
     args.x_dim = env.num_dim_x
     args.u_dim = env.action_space.shape[0]
+    args.action_dim = env.action_space.shape[0]
     args.episode_len = env.episode_len
 
     return env
 
 
-from policy import C3M, CARL, LQR, PPO, SD_LQR
+from policy import C3M, CARL, CORL, LQR, NCM, PPO, SD_LQR
 
 
 def _create_actor_critic(args):
     """Helper to instantiate Actor and Critic based on policy type."""
+    actor_activation = getattr(args, "actor_activation", "tanh")
     if args.policy_type == "CL":
         actor = CLActor(
             x_dim=args.x_dim,
@@ -70,6 +72,8 @@ def _create_actor_critic(args):
             num_windows=args.num_windows,
             mode=args.policy_mode,
             anneal_stddev=args.anneal_stddev,
+            hidden_dim=args.actor_dim,
+            activation=actor_activation,
         )
         critic = RLCritic(args.state_dim, hidden_dim=args.critic_dim)
     elif args.policy_type == "RL":
@@ -79,6 +83,7 @@ def _create_actor_critic(args):
             hidden_dim=args.actor_dim,
             mode=args.policy_mode,
             anneal_stddev=args.anneal_stddev,
+            activation=actor_activation,
         )
         critic = RLCritic(args.state_dim, hidden_dim=args.critic_dim)
     elif args.policy_type == "EncoderCL":
@@ -115,7 +120,7 @@ def _create_cmg(args, mode: str, device: torch.device) -> CCM_Generator:
     )
 
 
-def get_policy(env, args, get_f_and_B, SDC_func=None):
+def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
     algo = args.algo_name
     nupdates = args.timesteps / (args.minibatch_size * args.num_minibatch)
     if args.gamma is not None:
@@ -181,7 +186,13 @@ def get_policy(env, args, get_f_and_B, SDC_func=None):
     elif algo == "c3m":
         CMG = _create_cmg(args, mode="deterministic", device=args.device)
         # C3M uses a specific deterministic actor
-        actor = CLActor(x_dim=args.x_dim, u_dim=args.u_dim, mode="deterministic")
+        actor = CLActor(
+            x_dim=args.x_dim,
+            u_dim=args.u_dim,
+            mode="deterministic",
+            hidden_dim=args.actor_dim,
+            activation=getattr(args, "actor_activation", "tanh"),
+        )
         data = env.get_rollout(args.c3m_buffer_size, mode="c3m")
 
         return C3M(
@@ -239,6 +250,81 @@ def get_policy(env, args, get_f_and_B, SDC_func=None):
             K=args.K_epochs,
             nupdates=nupdates,
             policy_updates_per_cmg_update=args.policy_updates_per_cmg_update,
+            device=args.device,
+        )
+
+    elif algo == "ncm":
+        data = env.get_rollout(args.c3m_buffer_size, mode="c3m")
+
+        alpha = args.cvstem_alpha if args.cvstem_alpha is not None else args.lbd
+        return NCM(
+            x_dim=args.x_dim,
+            u_dim=args.u_dim,
+            data=data,
+            get_f_and_B=get_f_and_B,
+            dt=args.cvstem_dt if args.cvstem_dt is not None else env.dt,
+            alpha=alpha,
+            w_nu=args.cvstem_w_nu,
+            R_scaler=args.ncm_R_scaler,
+            epsilon=args.eps,
+            linesearch=not args.cvstem_no_linesearch,
+            include_dwdt=not args.cvstem_no_dwdt,
+            hidden_dims=args.cmg_hidden_dims,
+            activation=args.cmg_activation,
+            w_lb=args.w_lb,
+            W_lr=args.W_lr,
+            num_minibatch=args.num_minibatch,
+            minibatch_size=args.minibatch_size,
+            cvstem_num_samples=args.cvstem_num_samples,
+            nupdates=args.c3m_epochs,
+            num_windows=args.num_windows,
+            device=args.device,
+            logger=logger,
+            writer=writer,
+        )
+
+    elif algo == "corl":
+        CMG = _create_cmg(args, mode=args.CMG_mode, device=args.device)
+        actor, critic = _create_actor_critic(args)
+        data = env.get_rollout(args.c3m_buffer_size, mode="c3m")
+
+        return CORL(
+            x_dim=args.x_dim,
+            u_dim=args.u_dim,
+            CMG=CMG,
+            get_f_and_B=get_f_and_B,
+            data=data,
+            actor=actor,
+            critic=critic,
+            SDC_func=SDC_func,
+            Q_scaler=args.Q_scaler,
+            R_scaler=args.R_scaler,
+            pretrain_epochs=args.corl_pretrain_epochs,
+            pretrain_buffer_size=args.corl_pretrain_buffer_size,
+            pretrain_minibatch_size=args.corl_pretrain_minibatch_size,
+            W_lr=args.W_lr,
+            actor_lr=args.actor_lr,
+            critic_lr=args.critic_lr,
+            num_minibatch=args.num_minibatch,
+            minibatch_size=args.minibatch_size,
+            w_ub=args.w_ub,
+            w_lb=args.w_lb,
+            lbd=args.lbd,
+            eps=args.eps,
+            eps_clip=args.eps_clip,
+            W_entropy_scaler=args.W_entropy_scaler,
+            entropy_scaler=args.entropy_scaler,
+            tracking_scaler=env.tracking_scaler,
+            control_scaler=env.control_scaler,
+            target_kl=args.target_kl,
+            num_windows=args.num_windows,
+            gamma=gamma,
+            gae=args.gae,
+            K=args.K_epochs,
+            nupdates=nupdates,
+            policy_updates_per_cmg_update=args.policy_updates_per_cmg_update,
+            logger=logger,
+            writer=writer,
             device=args.device,
         )
 

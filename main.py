@@ -41,14 +41,14 @@ def run(args, seed, unique_id, exp_time):
     # get SDC
     SDC_func, init_epochs = get_SDC(env, args, logger, writer, get_f_and_B, init_epochs)
 
-    policy = get_policy(eval_env, args, get_f_and_B, SDC_func)
+    policy = get_policy(eval_env, args, get_f_and_B, SDC_func, logger=logger, writer=writer)
 
     if hasattr(policy, "warmup_result"):
         logger.write_images(
             step=0, image=policy.warmup_result, logdir="CMG_warmup_result"
         )
 
-    if args.algo_name.startswith(("carl", "ppo", "trpo", "cpo")):
+    if args.algo_name.startswith(("carl", "corl", "ppo", "trpo", "cpo")):
         sampler = OnlineSampler(
             state_dim=args.state_dim,
             u_dim=args.u_dim,
@@ -72,7 +72,7 @@ def run(args, seed, unique_id, exp_time):
             rendering=args.rendering,
         )
         trainer.train()
-    elif args.algo_name.startswith("c3m"):
+    elif args.algo_name.startswith(("c3m", "ncm")):
         trainer = C3MTrainer(
             env=env,
             eval_env=eval_env,

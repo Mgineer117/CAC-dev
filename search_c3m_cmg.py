@@ -5,6 +5,7 @@ import wandb
 import torch
 
 from utils.get_args import get_args
+from utils.misc import apply_arch_config, arch_sweep_parameters
 from main import run
 
 def train():
@@ -27,11 +28,10 @@ def train():
         args.u_lr = config.u_lr
     if "W_lr" in config:
         args.W_lr = config.W_lr
-    if "cmg_hidden_dims" in config:
-        args.cmg_hidden_dims = config.cmg_hidden_dims
-    if "cmg_activation" in config:
-        args.cmg_activation = config.cmg_activation
-        
+
+    # Override CMG / actor architecture (width, depth, activation)
+    apply_arch_config(args, config)
+
     # Setup for the trial run
     unique_id = str(uuid.uuid4())[:4]
     exp_time = datetime.datetime.now().strftime("%m-%d_%H-%M-%S.%f")
@@ -52,6 +52,8 @@ def train():
     print(f"      Time Begun: {exp_time}")
     print(f"      CMG activation: {args.cmg_activation}")
     print(f"      CMG dims: {args.cmg_hidden_dims}")
+    print(f"      Actor activation: {getattr(args, 'actor_activation', 'tanh')}")
+    print(f"      Actor dims: {args.actor_dim}")
     print(f"-------------------------------------------------------")
     
     # Run training
@@ -110,18 +112,8 @@ if __name__ == "__main__":
                     "max": 1e-3,
                     "distribution": "log_uniform_values"
                 },
-                "cmg_activation": {
-                    "values": ["siren", "tanh", "relu"]
-                },
-                "cmg_hidden_dims": {
-                    "values": [
-                        [64, 64],
-                        [128, 128],
-                        [256, 256],
-                        [128, 128, 128],
-                        [256, 256, 256]
-                    ]
-                }
+                # CMG + actor architecture (width, depth, activation)
+                **arch_sweep_parameters(include_cmg=True, include_actor=True),
             }
         }
         

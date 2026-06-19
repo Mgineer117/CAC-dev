@@ -5,6 +5,7 @@ import wandb
 import torch
 
 from utils.get_args import get_args
+from utils.misc import apply_arch_config, arch_sweep_parameters
 from main import run
 
 def train():
@@ -31,7 +32,10 @@ def train():
         args.W_lr = config.W_lr
     if "policy_updates_per_cmg_update" in config:
         args.policy_updates_per_cmg_update = config.policy_updates_per_cmg_update
-        
+
+    # Override CMG / actor architecture (width, depth, activation)
+    apply_arch_config(args, config)
+
     # Setup for the trial run
     unique_id = str(uuid.uuid4())[:4]
     exp_time = datetime.datetime.now().strftime("%m-%d_%H-%M-%S.%f")
@@ -115,12 +119,14 @@ if __name__ == "__main__":
                 },
                 "policy_updates_per_cmg_update": {
                     "values": [1, 5, 10, 20, 50, 100]
-                }
+                },
+                # CMG + actor architecture (width, depth, activation)
+                **arch_sweep_parameters(include_cmg=True, include_actor=True),
             }
         }
-        
+
         # Initialize the sweep
-        sweep_id = wandb.sweep(sweep_config, project=search_args.project) 
+        sweep_id = wandb.sweep(sweep_config, project=search_args.project)
         print(f"\n=======================================================")
         print(f"Created NEW wandb sweep with ID: {sweep_id}")
         print(f"To run additional agents in parallel, run:")

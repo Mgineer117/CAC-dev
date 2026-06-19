@@ -40,6 +40,7 @@ class CORL(CARL):
         pretrain_buffer_size: int = 10000,
         pretrain_minibatch_size: int = 1024,
         pretrain_log_interval: int = 100,
+        pretrain_W_lr: float = 1e-3,
         # early stopping (validation total-loss + plateau-slope + restore-best)
         val_split: float = 0.1,
         val_batch_size: int = 512,
@@ -75,6 +76,7 @@ class CORL(CARL):
         self.pretrain_buffer_size = pretrain_buffer_size
         self.pretrain_minibatch_size = pretrain_minibatch_size
         self.pretrain_log_interval = pretrain_log_interval
+        self.pretrain_W_lr = pretrain_W_lr
 
         # early stopping: validation total-loss, plateau-slope rule, restore best
         self.val_split = val_split
@@ -273,7 +275,7 @@ class CORL(CARL):
     def _log_pretrain_step(self, epoch: int, current_loss: float, infos: dict,
                            grad_norm: float):
         """Record per-step pretraining metrics to history, TensorBoard and console."""
-        W_lr = self.W_lr_scheduler.get_last_lr()[0]
+        W_lr = self.W_optimizer.param_groups[0]["lr"]
         record = {
             "epoch": epoch,
             "loss": current_loss,
@@ -389,6 +391,11 @@ class CORL(CARL):
         self._build_pretrain_buffer()
         self._setup_wandb_pretrain()
 
+        # Start the CMG (W) optimizer at pretrain_W_lr; we cosine-anneal it to 0 over
+        # the pretraining horizon (set per epoch below).
+        for g in self.W_optimizer.param_groups:
+            g["lr"] = self.pretrain_W_lr
+
         best_val = float("inf")
         best_state = self._snapshot_best()
         best_epoch = 0
@@ -398,6 +405,12 @@ class CORL(CARL):
 
         with tqdm(range(self.pretrain_epochs), desc="CORL CMG Pretrain") as pbar:
             for epoch in pbar:
+                # cosine LR anneal: pretrain_W_lr -> 0 across the pretraining horizon
+                frac = epoch / max(1, self.pretrain_epochs)
+                lr = self.pretrain_W_lr * 0.5 * (1.0 + np.cos(np.pi * frac))
+                for g in self.W_optimizer.param_groups:
+                    g["lr"] = lr
+
                 # sample a minibatch from the TRAIN split of the SD-LQR buffer
                 mb = min(self.pretrain_minibatch_size, len(self.train_indices))
                 sel = torch.randperm(len(self.train_indices), device=self.device)[:mb]
@@ -492,6 +505,12 @@ class CORL(CARL):
         # pretraining, and its Adam optimizer keeps moment tensors on the compute
         # device (not moved by to_device), which would also break MP pickling.
         self.SDC_func = None
+
+        # Drop the logger/writer handles: they hold wandb/file thread locks that are
+        # not picklable, which breaks the multiprocessing sampler (the policy is
+        # pickled onto workers). They are only used for pretraining logs.
+        self.logger = None
+        self.writer = None
 
     def _plot_pretrain_result(self):
         """Build a diagnostic figure of the CMG pretraining curves."""

@@ -305,6 +305,7 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             pretrain_epochs=args.corl_pretrain_epochs,
             pretrain_buffer_size=args.corl_pretrain_buffer_size,
             pretrain_minibatch_size=args.corl_pretrain_minibatch_size,
+            pretrain_W_lr=args.corl_pretrain_W_lr,
             val_split=args.corl_val_split,
             val_interval=args.corl_val_interval,
             plateau_tol=args.corl_plateau_tol,

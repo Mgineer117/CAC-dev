@@ -48,6 +48,16 @@ def run(args, seed, unique_id, exp_time):
             step=0, image=policy.warmup_result, logdir="CMG_warmup_result"
         )
 
+    # Keep the shared wandb global step monotonic: some policies (e.g. CORL) stream
+    # pretraining curves to wandb during get_policy, advancing the global step. The
+    # online/offline trainer logs with explicit steps based on init_epochs, so we
+    # must start it above the current wandb step or its early logs get dropped.
+    if wandb.run is not None:
+        try:
+            init_epochs = max(init_epochs, int(wandb.run.step))
+        except Exception:
+            pass
+
     if args.algo_name.startswith(("carl", "corl", "ppo", "trpo", "cpo")):
         sampler = OnlineSampler(
             state_dim=args.state_dim,

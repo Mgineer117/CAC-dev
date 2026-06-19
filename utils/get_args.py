@@ -181,6 +181,12 @@ def get_args():
         help="CORL: minibatch size used during CMG pretraining.",
     )
     parser.add_argument(
+        "--corl-pretrain-W-lr",
+        type=float,
+        default=1e-3,
+        help="CORL: initial CMG learning rate for pretraining (cosine-annealed to 0).",
+    )
+    parser.add_argument(
         "--corl-val-split",
         type=float,
         default=0.1,

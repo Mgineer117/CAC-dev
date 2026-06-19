@@ -431,8 +431,19 @@ class Evaluator:
                 N = 0
                 
             N_list.append(N)
-            
-        return np.nanmean(N_list), np.nanmean(c_gamma_N_list), np.nanmean(c_gamma_inf_list)
+
+        def _safe_nanmean(arr):
+            # np.nanmean warns and returns nan on an all-nan slice; guard it.
+            arr = np.asarray(arr, dtype=float)
+            if arr.size == 0 or np.all(np.isnan(arr)):
+                return np.nan
+            return float(np.nanmean(arr))
+
+        return (
+            _safe_nanmean(N_list),
+            _safe_nanmean(c_gamma_N_list),
+            _safe_nanmean(c_gamma_inf_list),
+        )
 
     def compute_value_contraction_metrics(
         self,

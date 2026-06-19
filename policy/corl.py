@@ -206,7 +206,7 @@ class CORL(CARL):
         ABK = A + matmul(B, K)
         MABK = matmul(M, ABK)
         sym_MABK = 0.5 * (MABK + transpose(MABK, 1, 2))
-        Cu = dot_M + 2 * sym_MABK + 2 * self.lbd * M.detach()
+        Cu = dot_M + 2 * sym_MABK + 2 * self.lbd * M
         Cu = Cu + self.eps * torch.eye(Cu.shape[-1], device=self.device)
 
         overshoot = W - self.w_ub * I

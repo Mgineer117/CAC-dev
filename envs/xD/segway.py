@@ -196,14 +196,15 @@ class SegwayEnv(BaseEnv):
             0.0 * weights / np.sqrt((weights**2).sum(axis=0, keepdims=True))
         ).tolist()
 
-        xref_list, uref_list = [xref_0], []
+        xref_list, xref_wrapped_list, uref_list = [xref_0], [xref_0], []
         for i, _t in enumerate(self.t):
             uref_t = self.sample_reference_controls(
                 freqs, weights, _t, {"xref_0": xref_0}
             )
-            xref_t, term, trunc = self.get_transition(xref_list[-1].copy(), uref_t)
+            xref_t, xref_wrapped_t, term, trunc, _ = self.get_transition(xref_list[-1].copy(), uref_t)
 
             xref_list.append(xref_t)
+            xref_wrapped_list.append(xref_wrapped_t)
             uref_list.append(uref_t)
 
             if term or trunc:
@@ -211,7 +212,7 @@ class SegwayEnv(BaseEnv):
 
         return (
             x_0,
-            np.array(xref_list),
+            np.array(xref_wrapped_list),
             np.array(uref_list),
             i + 1,
         )

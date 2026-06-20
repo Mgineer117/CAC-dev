@@ -33,7 +33,7 @@ It also relies on ``name`` for log-tag namespacing and sets ``warmup_result``
 import numpy as np
 import torch
 from scipy.linalg import solve_continuous_are
-from torch import inverse, matmul, transpose
+from torch import matmul, transpose
 from tqdm import tqdm
 
 
@@ -133,7 +133,7 @@ class SDLQRPretrainMixin:
 
         raw_W, info_W = self.CMG(x)  # n, x_dim, x_dim
         W = raw_W + self.w_lb * I
-        M = inverse(W)
+        M = torch.linalg.solve(W, I.unsqueeze(0).expand(W.shape[0], -1, -1))
 
         # === DYNAMICS (known) === #
         f, B, _ = self.get_f_and_B(x)

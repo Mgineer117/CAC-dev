@@ -5,7 +5,7 @@ from typing import Callable
 import numpy as np
 import torch
 import torch.nn as nn
-from torch import inverse, matmul, transpose
+from torch import matmul, transpose
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
@@ -201,7 +201,7 @@ class CARL(Base):
         raw_W, info_W = self.CMG(x)  # n, x_dim, x_dim
         # Add lower-bound scaled identity to guarantee positive definiteness
         W = raw_W + self.w_lb * I
-        M = inverse(W)  # n, x_dim, x_dim
+        M = torch.linalg.solve(W, I.unsqueeze(0).expand(W.shape[0], -1, -1))
 
         # === GET DYNAMICS === #
         f, B, Bbot = self.get_f_and_B(x)
@@ -630,7 +630,7 @@ class CARL(Base):
                 # Optional: print W values to see if they are inf or zero
                 print(f"  -> W mean: {W.mean().item()}")
 
-            M = torch.inverse(W)
+            M = torch.linalg.solve(W, torch.eye(W.shape[-1], device=W.device, dtype=W.dtype).unsqueeze(0).expand_as(W))
             check_nan(M, "M (after inverse)")
 
             tracking_errorT = transpose(tracking_error, 1, 2)

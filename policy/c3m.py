@@ -4,7 +4,7 @@ from typing import Callable
 import numpy as np
 import torch
 import torch.nn as nn
-from torch import inverse, matmul, transpose
+from torch import matmul, transpose
 from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 
@@ -190,7 +190,8 @@ class C3M(SDLQRPretrainMixin, Base):
         raw_W, _ = self.CMG(x)  # n, x_dim, x_dim
         # Add lower-bound scaled identity to guarantee positive definiteness
         W = raw_W + self.w_lb * I
-        M = inverse(W)  # n, x_dim, x_dim
+        # linalg.solve has better-conditioned gradients than inverse() when W is near-singular
+        M = torch.linalg.solve(W, I.unsqueeze(0).expand(W.shape[0], -1, -1))
 
         f, B, Bbot = self.get_f_and_B(x)
         f = f.to(self._dtype).to(self.device)  # n, x_dim
@@ -282,11 +283,18 @@ class C3M(SDLQRPretrainMixin, Base):
         )
 
     def optimize_params(self, loss: torch.Tensor):
-        grad_dict = {}
-
-        # === OPTIMIZATION STEP === #
         self.optimizer.zero_grad()
         loss.backward()
+
+        # NaN/Inf gradients (e.g. from near-singular W inverse) corrupt weights even
+        # after clipping — detect them early and skip this step entirely.
+        if any(
+            p.grad is not None and not torch.isfinite(p.grad).all()
+            for p in self.parameters()
+        ):
+            self.optimizer.zero_grad()
+            return {}
+
         torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
         grad_dict = self.compute_gradient_norm(
             [self.CMG, self.actor, self.lbd],
@@ -295,8 +303,6 @@ class C3M(SDLQRPretrainMixin, Base):
             device=self.device,
         )
         self.optimizer.step()
-
-        # lr scheduling
         self.lr_scheduler.step()
 
         return grad_dict

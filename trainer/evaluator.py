@@ -221,15 +221,22 @@ class Evaluator:
                 "C_gamma_inf": C_gamma_inf_mean,
             }
 
-            # CORL: certify how the SD-LQR (imperfect) control satisfies the
-            # value-contraction lemma along the discounted cost-to-go.
             policy_name = (
                 self.policy.__class__.__name__.lower()
                 if hasattr(self, "policy")
                 else ""
             )
+            design_lbd = getattr(self.policy, "lbd", lbd)
+
+            # C3M / CARL / CORL: verify theorem condition by back-computing η.
+            if policy_name in ("c3m", "carl", "corl"):
+                ep_buffer_entry.update(
+                    self.compute_eta_metrics(error_traj, gamma, design_lbd)
+                )
+
+            # CORL: certify how the SD-LQR (imperfect) control satisfies the
+            # value-contraction lemma along the discounted cost-to-go.
             if policy_name == "corl":
-                design_lbd = getattr(self.policy, "lbd", lbd)
                 ep_buffer_entry.update(
                     self.compute_value_contraction_metrics(
                         error_traj, gamma, design_lbd
@@ -280,6 +287,17 @@ class Evaluator:
 
         if not np.isnan(C_gamma_N_mean_total):
             eval_dict["eval/C_gamma_N"] = C_gamma_N_mean_total
+
+        # C3M / CARL / CORL η-verification metrics (aggregated over references).
+        if self.policy.__class__.__name__.lower() in ("c3m", "carl", "corl"):
+            eta_keys = [
+                "eval/eta_alpha", "eval/eta_emp",
+                "eval/eta_threshold", "eval/eta_theorem_ok", "eval/eta_violation_rate",
+            ]
+            for key in eta_keys:
+                vals = [b[key] for b in ep_buffers if key in b and not np.isnan(b[key])]
+                if vals:
+                    eval_dict[key], _ = self.mean_confidence_interval(vals)
 
         # CORL value-contraction certification metrics (aggregated over references).
         if self.policy.__class__.__name__.lower() == "corl":
@@ -371,35 +389,39 @@ class Evaluator:
         c_gamma_inf_list = []
         dt = self.eval_env.dt
         
+        def _cond(W: np.ndarray) -> float:
+            """Condition number of W^T W; returns 1.0 if W is non-finite."""
+            if not np.all(np.isfinite(W)):
+                return 1.0
+            try:
+                eigs = np.real(np.linalg.eigvals(W.T @ W))
+                if np.min(eigs) > 0:
+                    return float(np.sqrt(np.max(eigs) / np.min(eigs)))
+            except np.linalg.LinAlgError:
+                pass
+            return 1.0
+
         # Determine theoretical overshoot bound factor
         factor = 1.0
         policy_name = self.policy.__class__.__name__.lower() if hasattr(self, "policy") else ""
         if policy_name == "c3m":
             if hasattr(self.policy, "W"):
                 W = self.policy.W.detach().cpu().numpy()
-                if W.ndim == 3: W = W[0]
-                M = W.T @ W
-                eigvals = np.linalg.eigvals(M)
-                if np.min(np.real(eigvals)) > 0:
-                    factor = np.sqrt(np.max(np.real(eigvals)) / np.min(np.real(eigvals)))
+                if W.ndim == 3:
+                    W = W[0]
+                factor = _cond(W)
             elif hasattr(self.policy, "CMG") and hasattr(self.eval_env, "x_0"):
                 import torch
                 x0 = torch.tensor(self.eval_env.x_0, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
                 W = self.policy.CMG(x0)[0].detach().squeeze(0).cpu().numpy()
-                M = W.T @ W
-                eigvals = np.linalg.eigvals(M)
-                if np.min(np.real(eigvals)) > 0:
-                    factor = np.sqrt(np.max(np.real(eigvals)) / np.min(np.real(eigvals)))
+                factor = _cond(W)
         elif policy_name in ["carl", "corl", "trpo", "cpo", "ppo", "cac"]:
             if hasattr(self.policy, "CMG") and hasattr(self.eval_env, "x_0"):
                 import torch
                 x0 = torch.tensor(self.eval_env.x_0, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
                 W = self.policy.CMG(x0)[0].detach().squeeze(0).cpu().numpy()
-                M = W.T @ W
-                eigvals = np.linalg.eigvals(M)
-                if np.min(np.real(eigvals)) > 0:
-                    cond = np.sqrt(np.max(np.real(eigvals)) / np.min(np.real(eigvals)))
-                    factor = cond / (1 - gamma) if gamma < 1.0 else cond
+                cond = _cond(W)
+                factor = cond / (1 - gamma) if gamma < 1.0 else cond
 
         for ep_err in error_trajectories:
             N = 0
@@ -444,6 +466,81 @@ class Evaluator:
             _safe_nanmean(c_gamma_N_list),
             _safe_nanmean(c_gamma_inf_list),
         )
+
+    def compute_eta_metrics(
+        self,
+        error_trajectories: list[list[float]],
+        gamma: float,
+        lbd: float,
+    ) -> dict:
+        """Back-compute the empirical metric approximation error η from rollout data.
+
+        The value-contraction lemma guarantees:
+            V_C(s_k) ≤ α(η) · V_C(s_0) · e^{-2λkΔt},  α(η) = (m̲+η)/(m̲−η).
+
+        For α = 1 (η = 0) the bound must hold if M_ξ is perfect. Any violation
+        implies α > 1, from which we back-compute:
+            η_emp = m̲ · (α_emp − 1) / (α_emp + 1).
+
+        We also check the theorem condition:
+            η < m̲ · γ(1 − e^{−2λΔt}) / (2 − γ(1 + e^{−2λΔt})).
+        """
+        dt = self.eval_env.dt
+        eps = 1e-8
+        m_lb = getattr(self.policy, "w_lb", None)
+        if m_lb is None:
+            return {}
+        m_lb = float(m_lb)
+
+        alpha_list, viol_list = [], []
+
+        for ep_err in error_trajectories:
+            T = len(ep_err)
+            if T < 2:
+                continue
+            # discounted cost-to-go V_C(s_k) = sum_{j>=k} gamma^{j-k} * error_j
+            V = np.zeros(T)
+            acc = 0.0
+            for k in range(T - 1, -1, -1):
+                acc = ep_err[k] + gamma * acc
+                V[k] = acc
+            V0 = V[0]
+            if V0 <= eps:
+                continue
+            alpha_max = 1.0
+            for k in range(1, T):
+                if V[k] <= eps:
+                    continue
+                bound = V0 * np.exp(-2.0 * lbd * k * dt)
+                if bound <= eps:
+                    continue
+                alpha_k = V[k] / bound
+                alpha_max = max(alpha_max, alpha_k)
+                viol_list.append(1.0 if alpha_k > 1.0 else 0.0)
+            alpha_list.append(alpha_max)
+
+        if not alpha_list:
+            nan = float("nan")
+            return {k: nan for k in [
+                "eval/eta_alpha", "eval/eta_emp",
+                "eval/eta_threshold", "eval/eta_theorem_ok", "eval/eta_violation_rate",
+            ]}
+
+        alpha_emp = float(np.mean(alpha_list))
+        eta_emp = m_lb * (alpha_emp - 1.0) / (alpha_emp + 1.0) if alpha_emp > 1.0 else 0.0
+
+        # η threshold from the IES theorem: m̲ · γ(1−β) / (2 − γ(1+β)), β = e^{-2λΔt}
+        beta = np.exp(-2.0 * lbd * dt)
+        denom = 2.0 - gamma * (1.0 + beta)
+        eta_thresh = m_lb * gamma * (1.0 - beta) / denom if denom > eps else float("inf")
+
+        return {
+            "eval/eta_alpha":         alpha_emp,           # minimal α s.t. lemma holds
+            "eval/eta_emp":           eta_emp,             # back-computed η
+            "eval/eta_threshold":     eta_thresh,          # theorem η upper-bound
+            "eval/eta_theorem_ok":    float(eta_emp < eta_thresh),  # 1 = theorem holds
+            "eval/eta_violation_rate": float(np.mean(viol_list)) if viol_list else 0.0,
+        }
 
     def compute_value_contraction_metrics(
         self,

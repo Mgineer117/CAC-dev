@@ -2,7 +2,7 @@ from typing import Callable
 
 import torch
 import torch.nn as nn
-from torch import inverse, transpose
+from torch import transpose
 
 from policy.carl import CARL
 from policy.cmg_pretrain import SDLQRPretrainMixin
@@ -114,7 +114,7 @@ class CORL(SDLQRPretrainMixin, CARL):
             W = W + self.w_lb * torch.eye(self.x_dim, device=self.device).view(
                 1, self.x_dim, self.x_dim
             )
-            M = inverse(W)
+            M = torch.linalg.solve(W, torch.eye(self.x_dim, device=self.device, dtype=W.dtype).unsqueeze(0).expand_as(W))
 
             tracking_errorT = transpose(tracking_error, 1, 2)
             # Riemannian energy e^T M e  (>= 0)

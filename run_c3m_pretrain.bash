@@ -7,6 +7,15 @@
 AGENTS=5
 GPU=0
 SCRIPT=search_c3m_pretrain.py
+LOG_MAIN="log_c3m_pretrain_main.txt"
+
+# ── Self-daemonize: re-launch under nohup if not already detached ──────────
+if [ "${_C3M_PRETRAIN_DAEMON:-0}" != "1" ]; then
+    _C3M_PRETRAIN_DAEMON=1 nohup bash "$0" "$@" > "$LOG_MAIN" 2>&1 &
+    echo "Launched in background (PID $!). Survives terminal close."
+    echo "Follow progress: tail -f $LOG_MAIN"
+    exit 0
+fi
 
 echo "=================================================="
 echo "   C3M Pretrain Sweep  (GPU $GPU, $AGENTS jobs/env)"

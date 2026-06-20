@@ -1,7 +1,7 @@
 #!/bin/bash
 
 AGENTS=5
-GPU=0
+GPU=3
 
 echo "=========================================="
 echo "    C3M Sweep — Turtlebot (GPU $GPU)      "

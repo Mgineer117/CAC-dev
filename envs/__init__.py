@@ -1,4 +1,6 @@
 from envs.xD.cartpole import CartPoleEnv
+from envs.xD.linear import LinearEnv
+from envs.xD.poly import PolyEnv
 from envs.xD.segway import SegwayEnv
 from envs.xyD.car import CarEnv
 from envs.xyD.pvtol import PvtolEnv
@@ -9,6 +11,8 @@ from envs.xyzD.quadrotor import QuadRotorEnv
 
 __all__ = [
     "CartPoleEnv",
+    "LinearEnv",
+    "PolyEnv",
     "SegwayEnv",
     "CarEnv",
     "PvtolEnv",

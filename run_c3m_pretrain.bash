@@ -4,8 +4,8 @@
 # Runs 10 jobs per environment, one env at a time.
 # Flag: --c3m-pretrain-cmg
 
-AGENTS=10
-GPU=3
+AGENTS=5
+GPU=0
 SCRIPT=search_c3m_pretrain.py
 
 echo "=================================================="

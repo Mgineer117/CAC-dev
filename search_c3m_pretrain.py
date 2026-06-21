@@ -29,6 +29,15 @@ def train():
     if "W_lr" in config:
         args.W_lr = config.W_lr
 
+    # Bounded CMG: CLI flag sets the default; sweep config can override per-trial.
+    args.cmg_bounded = search_args.cmg_bounded
+    if "cmg_bounded" in config:
+        args.cmg_bounded = bool(config.cmg_bounded)
+
+    # Bounded CMG implies CMG pretraining — no point bounding without warm-starting.
+    if args.cmg_bounded:
+        args.c3m_pretrain_cmg = True
+
     # Override CMG / actor architecture (width, depth, activation)
     apply_arch_config(args, config)
 
@@ -66,7 +75,10 @@ if __name__ == "__main__":
     parser.add_argument("--sweep_id", type=str, default=None, help="WandB sweep ID to join")
     parser.add_argument("--count", type=int, default=100, help="Number of trials to run")
     parser.add_argument("--project", type=str, default="C3M-SWEEP", help="WandB project name")
-    
+    parser.add_argument("--cmg-bounded", action="store_true",
+                        help="Use BoundedCCM_Generator (eigenvalue sigmoid). "
+                             "Can also be searched per-trial via sweep config cmg_bounded.")
+
     # Parse only known search-specific args
     search_args, remaining_args = parser.parse_known_args()
     

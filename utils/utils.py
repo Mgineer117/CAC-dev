@@ -15,6 +15,7 @@ from envs import (
 from policy import C3M, CARL, CORL, LQR, NCM, PPO, SD_LQR
 from policy.cpo import CPO
 from policy.layers.CMG_networks import CCM_Generator
+from policy.layers.CMG_networks_bounded import BoundedCCM_Generator
 from policy.layers.policy_networks import (
     CLActor,
     EncoderCLActor,
@@ -108,10 +109,20 @@ def _create_actor_critic(args):
     return actor, critic
 
 
-def _create_cmg(args, mode: str, device: torch.device) -> CCM_Generator:
-    """Helper to create the CCM Generator."""
+def _create_cmg(args, mode: str, device: torch.device):
+    """Create CCM Generator — bounded (eigenvalue sigmoid) or standard."""
     cmg_hidden_dims = getattr(args, "cmg_hidden_dims", [128, 128])
     cmg_activation = getattr(args, "cmg_activation", "tanh")
+    if getattr(args, "cmg_bounded", False):
+        return BoundedCCM_Generator(
+            x_dim=args.x_dim,
+            hidden_dim=cmg_hidden_dims,
+            activation=cmg_activation,
+            mode=mode,
+            w_lb=args.w_lb if args.w_lb is not None else 0.1,
+            w_ub=args.w_ub if args.w_ub is not None else 10.0,
+            device=device,
+        )
     return CCM_Generator(
         x_dim=args.x_dim,
         hidden_dim=cmg_hidden_dims,

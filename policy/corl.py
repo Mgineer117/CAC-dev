@@ -110,10 +110,8 @@ class CORL(SDLQRPretrainMixin, CARL):
         control_effort = torch.linalg.norm(controls, dim=-1, keepdim=True)
 
         with torch.no_grad():
-            W, _ = self.CMG(x, deterministic=True)
-            W = W + self.w_lb * torch.eye(self.x_dim, device=self.device).view(
-                1, self.x_dim, self.x_dim
-            )
+            raw_W, _ = self.CMG(x, deterministic=True)
+            W = self._bound_W(raw_W)
             M = torch.linalg.solve(W, torch.eye(self.x_dim, device=self.device, dtype=W.dtype).unsqueeze(0).expand_as(W))
 
             tracking_errorT = transpose(tracking_error, 1, 2)

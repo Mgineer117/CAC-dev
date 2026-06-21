@@ -143,12 +143,14 @@ class C3M(SDLQRPretrainMixin, Base):
             self.logger = logger
             self.writer = writer
 
-            # Pretrain only the CMG with a dedicated optimizer, then keep it trainable
-            # (the shared self.optimizer continues to refine it during C3M training).
+            # Pretrain the CMG with a dedicated optimizer, then FREEZE it: the
+            # SD-LQR-warm-started metric defines the contraction geometry, and
+            # policy synthesis (the C3M actor) is trained against this fixed metric
+            # rather than co-adapting it.
             self.cmg_pretrain_optimizer = torch.optim.Adam(
                 self.CMG.parameters(), lr=pretrain_W_lr
             )
-            self.freeze_cmg_after_pretrain = False
+            self.freeze_cmg_after_pretrain = True
 
             self.pretrain_CMG()
 
@@ -188,8 +190,9 @@ class C3M(SDLQRPretrainMixin, Base):
         uref = self.to_tensor(batch["uref"])
 
         raw_W, _ = self.CMG(x)  # n, x_dim, x_dim
-        # Add lower-bound scaled identity to guarantee positive definiteness
-        W = raw_W + self.w_lb * I
+        # Lower-bound the metric inverse (no-op for the bounded CMG, which is
+        # already SPD in (w_lb, w_ub) by construction).
+        W = self._bound_W(raw_W)
         # linalg.solve has better-conditioned gradients than inverse() when W is near-singular
         M = torch.linalg.solve(W, I.unsqueeze(0).expand(W.shape[0], -1, -1))
 

@@ -263,6 +263,20 @@ class Base(Utilities, ABC):  # Inherit from Utilities and make abstract
 
         return x, xref, uref, t
 
+    def _bound_W(self, raw_W: torch.Tensor) -> torch.Tensor:
+        """Map a raw CMG output to the usable contraction-metric inverse W.
+
+        The standard CCM_Generator returns a PSD matrix (WᵀW); we add w_lb*I to
+        guarantee a strict positive-definite lower bound. The BoundedCCM_Generator
+        already returns an SPD matrix with eigenvalues in (w_lb, w_ub) by
+        construction (eigenvalue sigmoid), so it is used as-is — adding w_lb*I
+        there would double-count the lower bound and break the upper bound.
+        """
+        if getattr(self.CMG, "bounded", False):
+            return raw_W
+        I = torch.eye(self.x_dim, device=self.device, dtype=raw_W.dtype)
+        return raw_W + self.w_lb * I
+
     def define_loss_lists(self):
         (
             self.total_losses,

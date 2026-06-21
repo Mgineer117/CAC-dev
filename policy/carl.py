@@ -199,8 +199,9 @@ class CARL(Base):
         K = K.detach()
 
         raw_W, info_W = self.CMG(x)  # n, x_dim, x_dim
-        # Add lower-bound scaled identity to guarantee positive definiteness
-        W = raw_W + self.w_lb * I
+        # Lower-bound the metric inverse (no-op for the bounded CMG, which is
+        # already SPD in (w_lb, w_ub) by construction).
+        W = self._bound_W(raw_W)
         M = torch.linalg.solve(W, I.unsqueeze(0).expand(W.shape[0], -1, -1))
 
         # === GET DYNAMICS === #
@@ -621,10 +622,8 @@ class CARL(Base):
         check_nan(controls, "input controls")
 
         with torch.no_grad():
-            W, _ = self.CMG(x, deterministic=True)
-            W += self.w_lb * torch.eye(self.x_dim).to(self.device).view(
-                1, self.x_dim, self.x_dim
-            )
+            raw_W, _ = self.CMG(x, deterministic=True)
+            W = self._bound_W(raw_W)
 
             if check_nan(W, "W"):
                 # Optional: print W values to see if they are inf or zero

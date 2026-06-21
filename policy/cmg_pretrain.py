@@ -149,7 +149,9 @@ class SDLQRPretrainMixin:
         K = batch["K"].to(self.device)   # precomputed differential gain -K_lqr (detached)
 
         raw_W, info_W = self.CMG(x)  # n, x_dim, x_dim
-        W = raw_W + self.w_lb * I
+        # Lower-bound the metric inverse (no-op for the bounded CMG, which is
+        # already SPD in (w_lb, w_ub) by construction).
+        W = self._bound_W(raw_W)
         M = torch.linalg.solve(W, I.unsqueeze(0).expand(W.shape[0], -1, -1))
 
         # === DYNAMICS (known) === #
@@ -443,10 +445,14 @@ class SDLQRPretrainMixin:
         }
 
         self.eval()
-        # Optionally freeze the CMG (CORL fixes the metric during RL; warm-start
-        # users such as C3M keep training it jointly).
+        # Freeze the CMG so downstream policy synthesis trains against a fixed
+        # contraction metric (both CORL and C3M). We disable grad on the CMG
+        # parameters directly — C3M's main optimizer includes the CMG param group,
+        # so the stop_W_training flag alone would not stop it from updating.
         if getattr(self, "freeze_cmg_after_pretrain", True):
             self.stop_W_training = True
+            for p in self.CMG.parameters():
+                p.requires_grad_(False)
         self._dump_pretrain_csv()
 
         fig = self._plot_pretrain_result()

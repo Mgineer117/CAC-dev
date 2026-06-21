@@ -129,6 +129,11 @@ class CPO(Base):
                 {"params": self.cost_critic.parameters(), "lr": critic_lr},
             ]
         )
+        # Critic LR follows the shared linear-decay schedule (the actor is updated
+        # by CPO's constrained natural-gradient step, not this optimizer).
+        self.lr_scheduler = LambdaLR(
+            self.critic_optimizer, lr_lambda=self.lr_decay_lambda
+        )
 
         self.RunningMeanStd = RunningMeanStd(shape=(2,))
 
@@ -152,6 +157,9 @@ class CPO(Base):
 
         loss_dict, supp_dict, update_time = self.learn_cpo(batch)
         self.actor.anneal_stddev(progress, mode="exponential")
+
+        # Decay the critic LR per the shared schedule (progress set above).
+        self.lr_scheduler.step()
 
         self.num_RL_updates += 1
 

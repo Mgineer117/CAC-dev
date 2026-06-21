@@ -4,6 +4,7 @@ from copy import deepcopy
 import numpy as np
 import torch
 import torch.nn as nn
+from torch.optim.lr_scheduler import LambdaLR
 
 from policy.base import Base
 from utils.functions import (
@@ -96,6 +97,9 @@ class TRPO(Base):
         )
 
         self.progress = 0.0
+        # Critic LR follows the shared linear-decay schedule (the actor is updated
+        # by TRPO's natural-gradient line search, not this optimizer).
+        self.lr_scheduler = LambdaLR(self.optimizer, lr_lambda=self.lr_decay_lambda)
         self.cg_steps = 15
         self.cg_damping = damping
         self.backtrack_coeff = backtrack_coeff
@@ -260,6 +264,9 @@ class TRPO(Base):
         # Cleanup
         del states, controls, rewards, terminations, old_logprobs
         self.eval()
+
+        # Decay the critic LR per the shared schedule (progress set above).
+        self.lr_scheduler.step()
 
         update_time = time.time() - t0
 

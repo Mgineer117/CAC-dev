@@ -101,7 +101,7 @@ class NCM(Base):
         self.optimizer = torch.optim.Adam(
             [{"params": self.metric_net.parameters(), "lr": W_lr}]
         )
-        self.lr_scheduler = LambdaLR(self.optimizer, lr_lambda=self.lr_lambda)
+        self.lr_scheduler = LambdaLR(self.optimizer, lr_lambda=self.lr_decay_lambda)
 
         self.cvstem = CVSTEM(
             x_dim=x_dim, u_dim=u_dim, dt=dt, alpha=alpha, w_nu=w_nu,
@@ -114,9 +114,6 @@ class NCM(Base):
         self.to(self._dtype).to(self.device)
 
         self._build_cvstem_dataset()
-
-    def lr_lambda(self, step):
-        return max(0.0, 1.0 - float(step) / float(self.nupdates))
 
     # ------------------------------------------------------------------ #
     # CV-STEM target generation
@@ -222,6 +219,9 @@ class NCM(Base):
     def learn(self):
         self.train()
         t0 = time.time()
+
+        # Drive the shared LR schedule from the update fraction.
+        self.progress = min(1.0, self.num_updates / max(1, self.nupdates))
 
         loss = self.compute_loss()
         self.optimizer.zero_grad()

@@ -96,7 +96,7 @@ class C3M(SDLQRPretrainMixin, Base):
             ]
         )
 
-        self.lr_scheduler = LambdaLR(self.optimizer, lr_lambda=self.lr_lambda)
+        self.lr_scheduler = LambdaLR(self.optimizer, lr_lambda=self.lr_decay_lambda)
 
         self.num_updates = 0
         self.dummy = torch.tensor(1e-5)
@@ -153,10 +153,6 @@ class C3M(SDLQRPretrainMixin, Base):
             self.freeze_cmg_after_pretrain = True
 
             self.pretrain_CMG()
-
-    def lr_lambda(self, step):
-        return 1.0 - float(step) / float(self.nupdates)
-
 
 
     def forward(self, state: np.ndarray):
@@ -359,6 +355,10 @@ class C3M(SDLQRPretrainMixin, Base):
         """Performs a single training step using PPO, incorporating all reference training steps."""
         self.train()
         t0 = time.time()
+
+        # Drive the shared LR schedule from the update fraction (matches the RL
+        # algorithms' env-timestep progress).
+        self.progress = min(1.0, self.num_updates / max(1, self.nupdates))
 
         # === PERFORM OPTIMIZATION STEP === #
         loss, infos = self.compute_loss()

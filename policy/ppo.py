@@ -71,20 +71,11 @@ class PPO(Base):
 
         self.progress = 0.0
         self.ppo_lr_scheduler = LambdaLR(
-            self.optimizer, lr_lambda=self.timestep_lr_lambda
+            self.optimizer, lr_lambda=self.lr_decay_lambda
         )
 
         #
         self.to(self._dtype).to(self.device)
-
-    def timestep_lr_lambda(self, _):
-        """
-        Calculates LR multiplier based on total environment steps taken.
-        Ignores the internal scheduler 'step' counter (_).
-        """
-        # Linear decay: 1.0 -> 0.0
-        # Use max(0.0, ...) to prevent negative LR if we train longer than expected
-        return max(0.0, 1.0 - self.progress)
 
 
 

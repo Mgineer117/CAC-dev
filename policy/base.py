@@ -251,6 +251,21 @@ class Base(Utilities, ABC):  # Inherit from Utilities and make abstract
         # and loss functions (l1_loss, etc.) are
         # automatically inherited. No need to redefine them.
 
+        # 0->1 fraction of training completed, consumed by the shared LR schedule
+        # (lr_decay_lambda). Subclasses update it each step: RL algorithms from the
+        # env-timestep fraction passed to learn(); the supervised metric learners
+        # from their own update counter (num_updates / nupdates).
+        self.progress = 0.0
+
+    def lr_decay_lambda(self, _):
+        """Canonical LR schedule shared by every algorithm.
+
+        Linear decay from 1.0 to 0.0 driven purely by ``self.progress`` (the
+        LambdaLR step argument is ignored). The max() clamp keeps the multiplier
+        non-negative if training runs past its planned horizon.
+        """
+        return max(0.0, 1.0 - self.progress)
+
     def trim_state(self, state: torch.Tensor):
         """Trims a state tensor into its components (x, xref, uref, t)."""
         # state trimming

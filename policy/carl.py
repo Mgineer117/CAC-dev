@@ -127,10 +127,10 @@ class CARL(Base):
 
         self.progress = 0.0
         self.RL_lr_scheduler = LambdaLR(
-            self.RL_optimizer, lr_lambda=self.timestep_lr_lambda
+            self.RL_optimizer, lr_lambda=self.lr_decay_lambda
         )
         self.W_lr_scheduler = LambdaLR(
-            self.W_optimizer, lr_lambda=self.timestep_lr_lambda
+            self.W_optimizer, lr_lambda=self.lr_decay_lambda
         )
 
         self.to(self._dtype).to(self.device)
@@ -138,19 +138,6 @@ class CARL(Base):
         self.warmup_epochs = warmup_epochs
         if self.warmup_epochs > 0:
             self.warmup_W()
-
-    def timestep_lr_lambda(self, _):
-        """
-        Exponential decay: Multiplier = exp(-k * progress)
-        """
-        # Controls how fast it drops.
-        # k=10.0 means it drops to ~0.0045% (exp(-10)) by the end.
-        # k=5.0 means it drops to ~0.6% (exp(-5)) by the end.
-        # k=3.0 means it drops to ~5.0% (exp(-3)) by the end.
-        # decay_k = 3.0
-        # return math.exp(-decay_k * self.progress)
-
-        return max(0.0, 1.0 - self.progress)
 
     def anneal_entropy_scaler(self):
         """Linearly anneal the entropy scaler from initial to final value based on progress."""

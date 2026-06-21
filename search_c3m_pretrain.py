@@ -54,7 +54,12 @@ def train():
     
     # Force algorithm to c3m
     args.algo_name = "c3m"
-    
+
+    # Shorten each sweep trial to 1/5 of the configured C3M training length so the
+    # search explores more hyperparameter combinations in the same wall-clock budget.
+    if getattr(args, "c3m_epochs", None) is not None:
+        args.c3m_epochs = max(1, int(args.c3m_epochs / 5))
+
     print(f"-------------------------------------------------------")
     print(f"      C3M Sweep Trial ID: {unique_id}")
     print(f"      Seed: {seed}")

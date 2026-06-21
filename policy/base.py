@@ -502,7 +502,7 @@ class Base(Utilities, ABC):  # Inherit from Utilities and make abstract
 
         return loss_eigen, loss_reg
 
-    def Jacobian(self, f: torch.Tensor, x: torch.Tensor):
+    def Jacobian(self, f: torch.Tensor, x: torch.Tensor, create_graph: bool = True):
         """Computes the Jacobian of a vector f w.r.t. vector x."""
         # NOTE that this function assume that data are independent of each other
         f = f + 0.0 * x.sum()  # to avoid the case that f is independent of x
@@ -513,10 +513,10 @@ class Base(Utilities, ABC):  # Inherit from Utilities and make abstract
 
         J = torch.zeros(n, f_dim, x_dim).to(dtype=self._dtype, device=self.device)
         for i in range(f_dim):
-            J[:, i, :] = grad(f[:, i].sum(), x, create_graph=True)[0]
+            J[:, i, :] = grad(f[:, i].sum(), x, create_graph=create_graph)[0]
         return J
 
-    def Jacobian_Matrix(self, M: torch.Tensor, x: torch.Tensor):
+    def Jacobian_Matrix(self, M: torch.Tensor, x: torch.Tensor, create_graph: bool = True):
         """Computes the Jacobian of a matrix M w.r.t. vector x."""
         n = x.shape[0]
         matrix_dim = M.shape[-1]
@@ -527,12 +527,12 @@ class Base(Utilities, ABC):  # Inherit from Utilities and make abstract
         )
         for i in range(matrix_dim):
             for j in range(matrix_dim):
-                J[:, i, j, :] = grad(M[:, i, j].sum(), x, create_graph=True)[0]
+                J[:, i, j, :] = grad(M[:, i, j].sum(), x, create_graph=create_graph)[0]
 
         return J
 
-    def B_Jacobian(self, B: torch.Tensor, x: torch.Tensor):
-        """ComputOverwrites (if exists) or creates a file with the given content. This is a helper function for other tools and isn't intended to be used directly by the user."""
+    def B_Jacobian(self, B: torch.Tensor, x: torch.Tensor, create_graph: bool = True):
+        """Computes the Jacobian of each column of B w.r.t. x."""
         n = x.shape[0]
         x_dim = x.shape[-1]
 
@@ -540,22 +540,23 @@ class Base(Utilities, ABC):  # Inherit from Utilities and make abstract
             dtype=self._dtype, device=self.device
         )
         for i in range(self.u_dim):
-            DBDx[:, :, :, i] = self.Jacobian(B[:, :, i], x)
+            DBDx[:, :, :, i] = self.Jacobian(B[:, :, i], x, create_graph=create_graph)
         return DBDx
 
     def weighted_gradients(
-        self, W: torch.Tensor, v: torch.Tensor, x: torch.Tensor, detach: bool = False
+        self, W: torch.Tensor, v: torch.Tensor, x: torch.Tensor,
+        detach: bool = False, create_graph: bool = True,
     ):
         """Computes weighted gradients of a matrix W."""
         assert v.size() == x.size()
 
         bs = x.shape[0]
         if detach:
-            return (self.Jacobian_Matrix(W, x).detach() * v.view(bs, 1, 1, -1)).sum(
+            return (self.Jacobian_Matrix(W, x, create_graph=create_graph).detach() * v.view(bs, 1, 1, -1)).sum(
                 dim=3
             )
         else:
-            return (self.Jacobian_Matrix(W, x) * v.view(bs, 1, 1, -1)).sum(dim=3)
+            return (self.Jacobian_Matrix(W, x, create_graph=create_graph) * v.view(bs, 1, 1, -1)).sum(dim=3)
 
     # This method must be implemented by any child class
     @abstractmethod

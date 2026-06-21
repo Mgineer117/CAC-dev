@@ -63,7 +63,7 @@ def get_args():
     p.add_argument("--c3m-pretrain-cmg", action="store_true", help="C3M: warm-start CMG with SD-LQR recipe.")
     p.add_argument("--Q-scaler", type=float, default=1.0, help="CORL: state cost for SD-LQR Riccati.")
     p.add_argument("--R-scaler", type=float, default=0.0, help="CORL: control cost for SD-LQR Riccati.")
-    p.add_argument("--corl-pretrain-epochs", type=int, default=5000)
+    p.add_argument("--corl-pretrain-epochs", type=int, default=10000)
     p.add_argument("--corl-pretrain-buffer-size", type=int, default=10000)
     p.add_argument("--corl-pretrain-minibatch-size", type=int, default=1024)
     p.add_argument("--corl-pretrain-W-lr", type=float, default=1e-3, help="CORL: CMG pretrain LR (cosine-annealed).")

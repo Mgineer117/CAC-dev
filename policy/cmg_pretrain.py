@@ -83,35 +83,45 @@ class SDLQRPretrainMixin:
         return u, K_diff
 
     def _build_pretrain_buffer(self):
-        """Precompute SD-LQR controls/gains once for a fixed pretraining buffer."""
+        """Precompute SD-LQR controls/gains once for a fixed pretraining buffer.
+
+        All tensors are kept on CPU and moved to device per-minibatch in
+        compute_pretrain_loss. This avoids pinning n × x_dim² gain tensors in
+        VRAM for the full pretraining horizon — critical when multiple agents share
+        one GPU with large CMG architectures (width up to 1024).
+        """
         buffer_size = self.data["x"].shape[0]
         n = min(self.pretrain_buffer_size, buffer_size)
         indices = np.random.choice(buffer_size, size=n, replace=False)
 
-        x = self.to_tensor(self.data["x"][indices])
-        xref = self.to_tensor(self.data["xref"][indices])
-        uref = self.to_tensor(self.data["uref"][indices])
+        # Keep on CPU; only move to device per-chunk for the Riccati solve.
+        x = torch.from_numpy(self.data["x"][indices]).to(self._dtype)
+        xref = torch.from_numpy(self.data["xref"][indices]).to(self._dtype)
+        uref = torch.from_numpy(self.data["uref"][indices]).to(self._dtype)
 
         # Solve the per-sample Riccati equations once, in chunks.
         chunk = 2048
         u_list, K_list = [], []
         for s in tqdm(range(0, n, chunk), desc=f"{self.name} SD-LQR pretrain buffer"):
             sl = slice(s, min(s + chunk, n))
-            u_c, K_c = self._sdlqr_controls(x[sl], xref[sl], uref[sl])
-            u_list.append(u_c)
-            K_list.append(K_c)
+            u_c, K_c = self._sdlqr_controls(
+                x[sl].to(self.device), xref[sl].to(self.device), uref[sl].to(self.device)
+            )
+            u_list.append(u_c.cpu())
+            K_list.append(K_c.cpu())
 
         self.pretrain_data = {
             "x": x,
             "xref": xref,
             "uref": uref,
-            "u": torch.cat(u_list, dim=0),  # (n, u_dim)
-            "K": torch.cat(K_list, dim=0),  # (n, u_dim, x_dim)
+            "u": torch.cat(u_list, dim=0),  # (n, u_dim), CPU
+            "K": torch.cat(K_list, dim=0),  # (n, u_dim, x_dim), CPU
         }
         self.pretrain_size = n
 
         # Hold out an in-distribution validation split for early stopping.
-        perm = torch.randperm(n, device=self.device)
+        # Keep index tensors on CPU too — they are only used for indexing.
+        perm = torch.randperm(n)
         n_val = max(1, int(self.val_split * n))
         self.val_indices = perm[:n_val]
         self.train_indices = perm[n_val:]
@@ -124,12 +134,19 @@ class SDLQRPretrainMixin:
     # ------------------------------------------------------------------ #
     # Pretraining: minimize only the contraction loss Cu (no c1/c2)
     # ------------------------------------------------------------------ #
-    def compute_pretrain_loss(self, batch: dict):
+    def compute_pretrain_loss(self, batch: dict, create_graph: bool = True):
+        """Compute the CMG pretraining loss.
+
+        Pass create_graph=False for validation checks: the loss value is identical
+        but the Jacobian graphs are not retained for a second backward pass, saving
+        x_dim² × CMG_activation_size of VRAM per validation call.
+        """
         I = torch.eye(self.x_dim, device=self.device)
 
-        x = batch["x"].clone().requires_grad_()
-        u = batch["u"]  # precomputed SD-LQR control (detached)
-        K = batch["K"]  # precomputed differential gain -K_lqr (detached)
+        # Move CPU-resident buffer tensors to device for this minibatch.
+        x = batch["x"].to(self.device).clone().requires_grad_()
+        u = batch["u"].to(self.device)   # precomputed SD-LQR control (detached)
+        K = batch["K"].to(self.device)   # precomputed differential gain -K_lqr (detached)
 
         raw_W, info_W = self.CMG(x)  # n, x_dim, x_dim
         W = raw_W + self.w_lb * I
@@ -140,8 +157,8 @@ class SDLQRPretrainMixin:
         f = f.to(self._dtype).to(self.device)
         B = B.to(self._dtype).to(self.device)
 
-        DfDx = self.Jacobian(f, x)  # n, x_dim, x_dim
-        DBDx = self.B_Jacobian(B, x)  # n, x_dim, x_dim, u_dim
+        DfDx = self.Jacobian(f, x, create_graph=create_graph)  # n, x_dim, x_dim
+        DBDx = self.B_Jacobian(B, x, create_graph=create_graph)  # n, x_dim, x_dim, u_dim
 
         f = f.detach()
         B = B.detach()
@@ -154,7 +171,7 @@ class SDLQRPretrainMixin:
         )
 
         dot_x = f + matmul(B, u.unsqueeze(-1)).squeeze(-1)
-        dot_M = self.weighted_gradients(M, dot_x, x)
+        dot_M = self.weighted_gradients(M, dot_x, x, create_graph=create_graph)
 
         # contraction condition (closed loop under SD-LQR feedback)
         ABK = A + matmul(B, K)
@@ -299,12 +316,15 @@ class SDLQRPretrainMixin:
             print(f"[{self.name}] wandb pretrain logging unavailable: {exc}")
 
     def _validation_loss(self):
-        """Total pretrain loss on the held-out (in-distribution) validation batch."""
+        """Total pretrain loss on the held-out (in-distribution) validation batch.
+
+        Uses create_graph=False: we only need the numerical loss value, not its
+        gradient w.r.t. CMG parameters. This avoids retaining x_dim² second-order
+        graphs (up to ~256 MB for CMG width=1024) on every validation check.
+        """
         was_training = self.training
         self.eval()
-        # compute_pretrain_loss still needs the autograd graph for the metric
-        # Jacobians, but we never call backward here, so no parameter grads accumulate.
-        loss, _ = self.compute_pretrain_loss(self.val_batch)
+        loss, _ = self.compute_pretrain_loss(self.val_batch, create_graph=False)
         val = loss.item()
         if was_training:
             self.train()
@@ -361,7 +381,7 @@ class SDLQRPretrainMixin:
 
                 # sample a minibatch from the TRAIN split of the SD-LQR buffer
                 mb = min(self.pretrain_minibatch_size, len(self.train_indices))
-                sel = torch.randperm(len(self.train_indices), device=self.device)[:mb]
+                sel = torch.randperm(len(self.train_indices))[:mb]  # CPU randperm
                 idx = self.train_indices[sel]
                 batch = {k: v[idx] for k, v in self.pretrain_data.items()}
 
@@ -459,6 +479,14 @@ class SDLQRPretrainMixin:
         # pickled onto workers). They are only used for pretraining logs.
         self.logger = None
         self.writer = None
+
+        # Release cached VRAM immediately. Without this, PyTorch's CUDA caching
+        # allocator holds onto the pretrain-phase memory even after del, leaving
+        # less headroom for C3M main training — critical with 5 concurrent agents.
+        import gc
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     def _plot_pretrain_result(self):
         """Build a diagnostic figure of the CMG pretraining curves."""

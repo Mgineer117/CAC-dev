@@ -125,6 +125,11 @@ if __name__ == "__main__":
                     "max": 1e-3,
                     "distribution": "log_uniform_values"
                 },
+                # Toggle the bounded CMG (eigenvalue sigmoid) vs. the standard one
+                # per trial. train() auto-enables CMG pretraining when this is True.
+                "cmg_bounded": {
+                    "values": [True, False]
+                },
                 # CMG + actor architecture (width, depth, activation)
                 **arch_sweep_parameters(include_cmg=True, include_actor=True),
             }

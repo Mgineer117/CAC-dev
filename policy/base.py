@@ -513,7 +513,11 @@ class Base(Utilities, ABC):  # Inherit from Utilities and make abstract
 
         J = torch.zeros(n, f_dim, x_dim).to(dtype=self._dtype, device=self.device)
         for i in range(f_dim):
-            J[:, i, :] = grad(f[:, i].sum(), x, create_graph=create_graph)[0]
+            # retain_graph=True keeps the graph alive across loop iterations.
+            # When create_graph=False, grad() would default retain_graph=False and
+            # free the graph after i=0, causing "backward through graph a second time"
+            # on i=1. Explicit retain_graph=True fixes this regardless of create_graph.
+            J[:, i, :] = grad(f[:, i].sum(), x, create_graph=create_graph, retain_graph=True)[0]
         return J
 
     def Jacobian_Matrix(self, M: torch.Tensor, x: torch.Tensor, create_graph: bool = True):
@@ -527,7 +531,7 @@ class Base(Utilities, ABC):  # Inherit from Utilities and make abstract
         )
         for i in range(matrix_dim):
             for j in range(matrix_dim):
-                J[:, i, j, :] = grad(M[:, i, j].sum(), x, create_graph=create_graph)[0]
+                J[:, i, j, :] = grad(M[:, i, j].sum(), x, create_graph=create_graph, retain_graph=True)[0]
 
         return J
 

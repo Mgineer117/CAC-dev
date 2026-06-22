@@ -35,6 +35,7 @@ class C3M(SDLQRPretrainMixin, Base):
         warmup_epochs: int = 0,
         # --- optional SD-LQR CMG pretraining (the CORL recipe) ---
         pretrain_cmg: bool = False,
+        pretrain_c1c2: bool = False,
         SDC_func: nn.Module = None,
         Q_scaler: float = 1.0,
         R_scaler: float = 0.0,
@@ -122,6 +123,8 @@ class C3M(SDLQRPretrainMixin, Base):
             self.SDC_func = SDC_func.eval()
             self.Q_scaler = Q_scaler
             self.R_scaler = R_scaler
+            # Ablation: also minimize C1/C2 (Bbot-projected) during the warm-up.
+            self.pretrain_c1c2 = pretrain_c1c2
             self.W_entropy_scaler = 0.0  # deterministic CMG -> no entropy term
 
             # pretraining configuration

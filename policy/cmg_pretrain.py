@@ -4,7 +4,8 @@ The contraction metric generator (CMG) is pretrained by minimizing only the
 contraction loss Cu, where the control used inside the contraction condition is
 computed by SD-LQR: for each sampled state we solve the state-dependent Riccati
 equation to obtain u = SD-LQR(x) and the feedback gain K_lqr, and use (u, -K_lqr)
-in the contraction condition. The c1/c2 conditions are dropped during pretraining.
+in the contraction condition. The c1/c2 conditions are dropped during pretraining by
+default; set ``pretrain_c1c2`` to additionally minimize them (an ablation).
 
 This logic was originally written for CORL; it is factored into ``SDLQRPretrainMixin``
 so that other policies (e.g. C3M) can warm-start their CMG with the same recipe.
@@ -184,7 +185,9 @@ class SDLQRPretrainMixin:
 
         overshoot = W - self.w_ub * I
 
-        # === LOSSES (contraction + conditioning only) === #
+        # === LOSSES (contraction + conditioning only; no c1/c2) === #
+        # C1/C2 are handled in a separate init phase before this one — see
+        # _init_cmg_with_c1c2() and the two-phase pipeline in pretrain_CMG().
         pd_loss, pd_reg = self.loss_pos_matrix_eigen(-Cu)
         overshoot_loss, overshoot_reg = self.loss_pos_matrix_eigen(-overshoot)
         entropy_loss = info_W["entropy"].mean() * self.W_entropy_scaler
@@ -210,6 +213,98 @@ class SDLQRPretrainMixin:
                 "W_cond": W_cond,
             },
         )
+
+    # ------------------------------------------------------------------ #
+    # Phase 1 (optional): initialize the metric by minimizing C1/C2 only
+    # ------------------------------------------------------------------ #
+    def _compute_c1c2_loss(self, x: torch.Tensor, create_graph: bool = True):
+        """C1/C2 (Bbot-projected) feasibility loss for the metric init phase.
+
+        These conditions constrain only the metric W and the (known) dynamics —
+        no controls are needed, so this runs without the SD-LQR buffer's u/K.
+        """
+        x = x.to(self.device).clone().requires_grad_()
+
+        raw_W, _ = self.CMG(x)
+        W = self._bound_W(raw_W)
+
+        f, B, Bbot = self.get_f_and_B(x)
+        f = f.to(self._dtype).to(self.device)
+        B = B.to(self._dtype).to(self.device)
+        Bbot = Bbot.to(self._dtype).to(self.device)
+
+        DfDx = self.Jacobian(f, x, create_graph=create_graph)
+        DBDx = self.B_Jacobian(B, x, create_graph=create_graph)
+
+        f = f.detach()
+        B = B.detach()
+        Bbot = Bbot.detach()
+
+        # C1: drift contraction projected onto the input-null space (Bbot).
+        DfW = self.weighted_gradients(W, f, x, create_graph=create_graph)
+        DfDxW = matmul(DfDx, W)
+        sym_DfDxW = 0.5 * (DfDxW + transpose(DfDxW, 1, 2))
+        C1_inner = -DfW + 2 * sym_DfDxW + 2 * self.lbd * W
+        C1 = matmul(matmul(transpose(Bbot, 1, 2), C1_inner), Bbot)
+        C1 = C1 + self.eps * torch.eye(C1.shape[-1], device=self.device)
+
+        # C2: control-direction integrability, also projected onto Bbot.
+        C2_sq = []
+        for j in range(self.u_dim):
+            DbW = self.weighted_gradients(W, B[:, :, j], x, create_graph=create_graph)
+            DbDxW = matmul(DBDx[:, :, :, j], W)
+            sym_DbDxW = 0.5 * (DbDxW + transpose(DbDxW, 1, 2))
+            C2_inner = DbW - 2 * sym_DbDxW
+            C2 = matmul(matmul(transpose(Bbot, 1, 2), C2_inner), Bbot)
+            C2_sq.append((C2**2).reshape(x.shape[0], -1).sum(1).mean())
+
+        c1_loss, c1_reg = self.loss_pos_matrix_eigen(-C1)
+        c2_loss = sum(C2_sq)
+        loss = c1_loss + c1_reg + c2_loss
+        return loss, {"c1_loss": c1_loss, "c2_loss": c2_loss}
+
+    def _init_cmg_with_c1c2(self):
+        """Phase 1: warm the CMG up on the C1/C2 conditions before contraction.
+
+        A fixed-horizon loop (no early stopping) that seeds the metric to be
+        geometrically feasible (C1/C2) before the SD-LQR contraction (pd) phase
+        refines it. Reuses the pretrain buffer's states and the CMG optimizer.
+        """
+        for g in self.cmg_pretrain_optimizer.param_groups:
+            g["lr"] = self.pretrain_W_lr
+
+        with tqdm(range(self.pretrain_epochs), desc=f"{self.name} CMG C1/C2 Init") as pbar:
+            for epoch in pbar:
+                # cosine LR anneal, mirroring the contraction phase
+                frac = epoch / max(1, self.pretrain_epochs)
+                lr = self.pretrain_W_lr * 0.5 * (1.0 + np.cos(np.pi * frac))
+                for g in self.cmg_pretrain_optimizer.param_groups:
+                    g["lr"] = lr
+
+                mb = min(self.pretrain_minibatch_size, len(self.train_indices))
+                sel = torch.randperm(len(self.train_indices))[:mb]
+                x = self.pretrain_data["x"][self.train_indices[sel]]
+
+                loss, infos = self._compute_c1c2_loss(x)
+                grad_norm = self._optimize_cmg_pretrain(loss)
+
+                if self.writer is not None:
+                    self.writer.add_scalar(f"{self.name}/pretrain_c1c2/loss", loss.item(), epoch)
+                    self.writer.add_scalar(f"{self.name}/pretrain_c1c2/c1_loss", infos["c1_loss"].item(), epoch)
+                    self.writer.add_scalar(f"{self.name}/pretrain_c1c2/c2_loss", infos["c2_loss"].item(), epoch)
+
+                pbar.set_postfix(
+                    loss=f"{loss.item():.4f}",
+                    c1=f"{infos['c1_loss'].item():.2g}",
+                    c2=f"{infos['c2_loss'].item():.2g}",
+                    grad=f"{grad_norm:.2g}",
+                )
+
+                if epoch % self.pretrain_log_interval == 0:
+                    pbar.write(
+                        f"[{self.name} c1c2-init {epoch}] loss={loss.item():.4f} "
+                        f"c1={infos['c1_loss'].item():.3g} c2={infos['c2_loss'].item():.3g}"
+                    )
 
     def _optimize_cmg_pretrain(self, loss: torch.Tensor) -> float:
         """One optimizer step over the CMG parameters; returns the CMG grad norm."""
@@ -360,6 +455,11 @@ class SDLQRPretrainMixin:
         self._init_pretrain_state()
         self._build_pretrain_buffer()
         self._setup_wandb_pretrain()
+
+        # Phase 1 (optional): initialize the metric on the C1/C2 conditions first,
+        # then fall through to the contraction (pd) phase below.
+        if getattr(self, "pretrain_c1c2", False):
+            self._init_cmg_with_c1c2()
 
         # Start the CMG optimizer at pretrain_W_lr; we cosine-anneal it to 0 over the
         # pretraining horizon (set per epoch below).

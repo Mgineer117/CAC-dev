@@ -54,7 +54,7 @@ class OnlineTrainer(Evaluator):
     def train(self) -> dict[str, float]:
         start_time = time.time()
 
-        self.last_auc_mean = deque(maxlen=3)
+        self.last_auc_mean = deque(maxlen=1)
 
         # Define a helper function to avoid code duplication
         def run_eval(step_count, eval_log=True):

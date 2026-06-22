@@ -132,6 +132,9 @@ def arch_sweep_parameters(include_cmg: bool = True, include_actor: bool = True) 
     if include_actor:
         params["actor_width"] = {"values": ARCH_WIDTHS}
         params["actor_depth"] = {"values": ARCH_DEPTHS}
+        # NOTE: "siren" is a network type, not a pointwise activation, and is only
+        # wired into the C3M CLActor (get_u_model). Sweeps over RLActor-based algos
+        # (CARL/CORL) must not include it. C3M sweeps override this list explicitly.
         params["actor_activation"] = {"values": ["tanh", "relu", "elu"]}
     return params
 

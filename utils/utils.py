@@ -14,7 +14,6 @@ from envs import (
 )
 from policy import C3M, CARL, CORL, LQR, NCM, PPO, SD_LQR
 from policy.cpo import CPO
-from policy.layers.CMG_networks import CCM_Generator
 from policy.layers.CMG_networks_bounded import BoundedCCM_Generator
 from policy.layers.policy_networks import (
     CLActor,
@@ -110,24 +109,21 @@ def _create_actor_critic(args):
 
 
 def _create_cmg(args, mode: str, device: torch.device):
-    """Create CCM Generator — bounded (eigenvalue sigmoid) or standard."""
+    """Create the contraction metric generator.
+
+    Always the BoundedCCM_Generator: an eigenvalue sigmoid enforces the
+    w_lb/w_ub bounds by construction (the strict matrix analogue of a*tanh for
+    actions), so no overshoot loss or w_lb*I shift is needed downstream.
+    """
     cmg_hidden_dims = getattr(args, "cmg_hidden_dims", [128, 128])
     cmg_activation = getattr(args, "cmg_activation", "tanh")
-    if getattr(args, "cmg_bounded", False):
-        return BoundedCCM_Generator(
-            x_dim=args.x_dim,
-            hidden_dim=cmg_hidden_dims,
-            activation=cmg_activation,
-            mode=mode,
-            w_lb=args.w_lb if args.w_lb is not None else 0.1,
-            w_ub=args.w_ub if args.w_ub is not None else 10.0,
-            device=device,
-        )
-    return CCM_Generator(
+    return BoundedCCM_Generator(
         x_dim=args.x_dim,
         hidden_dim=cmg_hidden_dims,
         activation=cmg_activation,
         mode=mode,
+        w_lb=args.w_lb if args.w_lb is not None else 0.1,
+        w_ub=args.w_ub if args.w_ub is not None else 10.0,
         device=device,
     )
 
@@ -225,6 +221,7 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             nupdates=args.c3m_epochs,
             # optional SD-LQR CMG pretraining (the CORL recipe); reuses the corl-* args
             pretrain_cmg=args.c3m_pretrain_cmg,
+            pretrain_c1c2=getattr(args, "c3m_pretrain_c1c2", False),
             SDC_func=SDC_func,
             Q_scaler=args.Q_scaler,
             R_scaler=args.R_scaler,

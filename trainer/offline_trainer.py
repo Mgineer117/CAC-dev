@@ -49,7 +49,7 @@ class C3MTrainer(Evaluator):
     def train(self) -> dict[str, float]:
         start_time = time.time()
 
-        self.last_auc_mean = deque(maxlen=3)
+        self.last_auc_mean = deque(maxlen=1)
 
         # Train loop
         batch_size = 2048

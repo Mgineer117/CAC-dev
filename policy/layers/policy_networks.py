@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Categorical, Normal
 
-from policy.layers.building_blocks import MLP
+from policy.layers.building_blocks import MLP, SirenNet
 
 
 def get_activation(activation):
@@ -51,10 +51,18 @@ def get_u_model(
     """
     if hidden_dims is None:
         hidden_dims = [128]
-    activation = get_activation(activation)
 
     input_dim = 2 * x_dim  # Concatenated trimmed x and x_ref
     c = 3 * x_dim  # Intermediate dimension multiplier
+
+    # SIREN backbone (sinusoidal activations) is a network type rather than a
+    # pointwise activation, so it is built directly instead of via get_activation.
+    if isinstance(activation, str) and activation.lower() == "siren":
+        w1 = SirenNet(input_dim, list(hidden_dims), c * x_dim)
+        w2 = SirenNet(input_dim, list(hidden_dims), c * u_dim)
+        return w1, w2
+
+    activation = get_activation(activation)
 
     # First weight generator (for projecting error vector to latent space)
     w1 = MLP(input_dim, list(hidden_dims), c * x_dim, activation=activation)

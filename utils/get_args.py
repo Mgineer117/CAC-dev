@@ -61,6 +61,8 @@ def get_args():
 
     # --- CORL / CMG pretraining ---
     p.add_argument("--c3m-pretrain-cmg", action="store_true", help="C3M: warm-start CMG with SD-LQR recipe.")
+    p.add_argument("--c3m-pretrain-c1c2", action="store_true",
+                   help="C3M: also minimize the C1/C2 (Bbot-projected) conditions during CMG warm-start.")
     p.add_argument("--Q-scaler", type=float, default=1.0, help="CORL: state cost for SD-LQR Riccati.")
     p.add_argument("--R-scaler", type=float, default=0.0, help="CORL: control cost for SD-LQR Riccati.")
     p.add_argument("--corl-pretrain-epochs", type=int, default=10000)
@@ -76,9 +78,6 @@ def get_args():
     p.add_argument("--dynamic-dim", type=list, default=[256, 256], help="Dynamics net hidden dims.")
     p.add_argument("--cmg-hidden-dims", type=list, default=[128, 128])
     p.add_argument("--cmg-activation", type=str, default="tanh", help="['tanh', 'relu', 'siren'].")
-    p.add_argument("--cmg-bounded", action="store_true",
-                   help="Use BoundedCCM_Generator: eigenvalue sigmoid enforces w_lb/w_ub by "
-                        "construction (no overshoot loss needed).")
     p.add_argument("--sdc-dim", type=list, default=[256, 256], help="SDC net hidden dims.")
     p.add_argument("--actor-dim", type=list, default=[64, 64])
     p.add_argument("--actor-activation", type=str, default="tanh", help="['tanh', 'relu', 'elu', 'leaky_relu', 'gelu'].")

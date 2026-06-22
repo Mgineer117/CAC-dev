@@ -12,7 +12,7 @@ from envs import (
     SegwayEnv,
     TurtlebotEnv,
 )
-from policy import C3M, CARL, CORL, LQR, NCM, PPO, SD_LQR
+from policy import C3M, CARL, CARL_M, CORL, LQR, NCM, PPO, SD_LQR
 from policy.cpo import CPO
 from policy.layers.CMG_networks_bounded import BoundedCCM_Generator
 from policy.layers.policy_networks import (
@@ -264,6 +264,46 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             eps_clip=args.eps_clip,
             W_entropy_scaler=args.W_entropy_scaler,
             reward_mode=args.reward_mode,
+            entropy_scaler=args.entropy_scaler,
+            tracking_scaler=env.tracking_scaler,
+            control_scaler=env.control_scaler,
+            target_kl=args.target_kl,
+            num_windows=args.num_windows,
+            gamma=gamma,
+            gae=args.gae,
+            K=args.k_epochs,
+            nupdates=nupdates,
+            policy_updates_per_cmg_update=args.policy_updates_per_cmg_update,
+            device=args.device,
+        )
+
+    elif algo == "carl_m":
+        # CARL with the raw Mahalanobis tracking reward -||e||^2_M.
+        # reward_mode is hardcoded to "mahal" inside CARL_M; no need to pass it.
+        CMG = _create_cmg(args, mode=args.cmg_mode, device=args.device)
+        actor, critic = _create_actor_critic(args)
+        data = env.get_rollout(args.c3m_buffer_size, mode="c3m")
+
+        return CARL_M(
+            x_dim=args.x_dim,
+            u_dim=args.u_dim,
+            CMG=CMG,
+            get_f_and_B=get_f_and_B,
+            data=data,
+            actor=actor,
+            critic=critic,
+            W_lr=args.W_lr,
+            actor_lr=args.actor_lr,
+            critic_lr=args.critic_lr,
+            num_minibatch=args.num_minibatch,
+            minibatch_size=args.minibatch_size,
+            disable_CMG_training=args.disable_cmg_training,
+            w_ub=args.w_ub,
+            w_lb=args.w_lb,
+            lbd=args.lbd,
+            eps=args.eps,
+            eps_clip=args.eps_clip,
+            W_entropy_scaler=args.W_entropy_scaler,
             entropy_scaler=args.entropy_scaler,
             tracking_scaler=env.tracking_scaler,
             control_scaler=env.control_scaler,

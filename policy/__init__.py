@@ -1,6 +1,7 @@
 # __init__.py
 from .c3m import C3M
 from .carl import CARL
+from .carl_m import CARL_M
 from .corl import CORL
 from .lqr import LQR
 from .ncm import NCM
@@ -14,6 +15,7 @@ __all__ = [
     "TRPO",
     "C3M",
     "CARL",
+    "CARL_M",
     "CORL",
     "NCM",
     "LQR",

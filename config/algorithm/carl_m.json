@@ -1,0 +1,8 @@
+{
+    "policy_mode": "stochastic",
+    "anneal_stddev": false,
+    "cmg_mode": "stochastic",
+    "W_entropy_scaler": 0.001,
+    "num_windows": 1,
+    "policy_type": "CL"
+}

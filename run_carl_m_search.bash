@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Number of agents to run
-AGENTS=3
+AGENTS=4
 
 echo "=========================================================="
 echo "   Launching CARL_M Hyperparameter Sweep in Background    "
@@ -26,7 +26,7 @@ echo "✅ CARL_M Sweep created with ID: $SWEEP_ID"
 # ----------------------------------------------------------------------
 echo "🚀 Launching $AGENTS agents..."
 for ((i=1; i<=$AGENTS; i++)); do
-    python3 search_carl_m.py --sweep_id $SWEEP_ID --project CARL-M-SWEEP > log_sweep_carl_m_$i.txt 2>&1 &
+    python3 search_carl_m.py --sweep_id $SWEEP_ID --project CARL-M-SWEEP --task cartpole > log_sweep_carl_m_$i.txt 2>&1 &
 done
 echo ""
 

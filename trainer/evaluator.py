@@ -120,7 +120,15 @@ class Evaluator:
 
     def evaluate(self):
         """
-        Given one ref, show tracking performance
+        Given one ref, show tracking performance.
+
+        Logged metrics (6 total):
+          1. eval/auc              — normalised AUC of tracking error
+          2. eval/control_effort   — mean squared control magnitude
+          3. eval/contraction_rate — fitted λ of the exponential envelope
+          4. eval/latency_ms       — policy inference latency in ms
+          5. eval/performance_score — λ / C  (contraction efficiency)
+          6. eval/contraction_flag  — 1 if empirical C exceeds theory bound
         """
         dimension = self.eval_env.pos_dimension
         ep_buffers = []
@@ -137,7 +145,7 @@ class Evaluator:
                 obs, infos = self.eval_env.reset(seed=self.seed, options=options)
 
                 # Episode variables
-                ep_return, ep_ctrl_effort, ep_inf_time = 0, 0, 0
+                ep_ctrl_effort, ep_inf_time = 0, 0
                 ep_track_traj, ep_error_traj = [], []
 
                 # Episode rollout
@@ -160,9 +168,6 @@ class Evaluator:
                     obs, rew, term, trunc, infos = self.eval_env.step(a)
                     done = term or trunc
 
-                    # === Logging === #
-                    gamma = getattr(self.policy, "gamma", 1.0)
-                    ep_return += gamma**t * rew
                     ep_ctrl_effort += infos["control_effort"]
                     ep_inf_time += t1 - t0
 
@@ -177,12 +182,13 @@ class Evaluator:
 
                         ep_buffer.append(
                             {
-                                "return": ep_return,
                                 "avg_ctrl_effort": ep_ctrl_effort / t,
-                                "avg_inf_time": ep_inf_time / t,
-                                "mauc": auc * (self.eval_env.episode_len / t),
-                                "m2auc": auc * ((self.eval_env.episode_len / t) ** 2),
-                                "episode_len": t + 1,
+                                "avg_inf_time":    ep_inf_time / t,
+                                "mauc":            auc * (self.eval_env.episode_len / t),
+                                # ‖e(0)‖₂ — used for the contraction-flag bound
+                                "init_cost":       np.sqrt(
+                                    max(self.eval_env.init_tracking_error, 0.0)
+                                ),
                             }
                         )
                         track_traj.append(ep_track_traj)
@@ -191,131 +197,78 @@ class Evaluator:
                         break
 
             # === ref traj level logging === #
-            rew_list = [ep_info["return"] for ep_info in ep_buffer]
-            ctr_list = [ep_info["avg_ctrl_effort"] for ep_info in ep_buffer]
-            mauc_list = [ep_info["mauc"] for ep_info in ep_buffer]
-            inf_list = [ep_info["avg_inf_time"] for ep_info in ep_buffer]
+            ctr_list  = [ep["avg_ctrl_effort"] for ep in ep_buffer]
+            mauc_list = [ep["mauc"]            for ep in ep_buffer]
+            inf_list  = [ep["avg_inf_time"]    for ep in ep_buffer]
+            init_cost_list = [ep["init_cost"]  for ep in ep_buffer]
 
-            ret_mean, _ = self.mean_confidence_interval(rew_list)
             mauc_mean, _ = self.mean_confidence_interval(mauc_list)
             ctrl_mean, _ = self.mean_confidence_interval(ctr_list)
-            inf_mean, _ = self.mean_confidence_interval(inf_list)
+            inf_mean, _  = self.mean_confidence_interval(inf_list)
+            init_cost_mean = float(np.mean(init_cost_list))
 
             C, lbd = self.compute_contraction_rate(error_traj)
-            gamma = getattr(self.policy, "gamma", 1.0)
-            N_mean, C_gamma_N_mean, C_gamma_inf_mean = self.compute_gamma_discounted_cost(error_traj, gamma, lbd)
 
             if i == 0:
-                fig = self.plot_trajectories(track_traj, error_traj, dimension, C, lbd)
+                fig = self.plot_trajectories(
+                    track_traj, error_traj, dimension, C, lbd, init_cost_mean
+                )
 
-            #
-            ep_buffer_entry = {
-                "return": ret_mean,
-                "avg_ctrl_effort": ctrl_mean,
-                "mauc": mauc_mean,
-                "avg_inf_time": inf_mean,
-                "overshoot": C,
-                "contraction_rate": lbd,
-                "N": N_mean,
-                "C_gamma_N": C_gamma_N_mean,
-                "C_gamma_inf": C_gamma_inf_mean,
-            }
-
-            policy_name = (
-                self.policy.__class__.__name__.lower()
-                if hasattr(self, "policy")
-                else ""
+            ep_buffers.append(
+                {
+                    "avg_ctrl_effort": ctrl_mean,
+                    "mauc":            mauc_mean,
+                    "avg_inf_time":    inf_mean,
+                    "overshoot":       C,
+                    "contraction_rate": lbd,
+                    "init_cost":       init_cost_mean,
+                }
             )
-            design_lbd = getattr(self.policy, "lbd", lbd)
-
-            # C3M / CARL / CORL: verify theorem condition by back-computing η.
-            if policy_name in ("c3m", "carl", "corl"):
-                ep_buffer_entry.update(
-                    self.compute_eta_metrics(error_traj, gamma, design_lbd)
-                )
-
-            # CORL: certify how the SD-LQR (imperfect) control satisfies the
-            # value-contraction lemma along the discounted cost-to-go.
-            if policy_name == "corl":
-                ep_buffer_entry.update(
-                    self.compute_value_contraction_metrics(
-                        error_traj, gamma, design_lbd
-                    )
-                )
-
-            ep_buffers.append(ep_buffer_entry)
 
         # === eval num level logging === #
-        rew_list = [ep_info["return"] for ep_info in ep_buffers]
-        ctr_list = [ep_info["avg_ctrl_effort"] for ep_info in ep_buffers]
-        mauc_list = [ep_info["mauc"] for ep_info in ep_buffers]
-        inf_list = [ep_info["avg_inf_time"] for ep_info in ep_buffers]
-        overshoot_list = [ep_info["overshoot"] for ep_info in ep_buffers]
-        lbd_list = [ep_info["contraction_rate"] for ep_info in ep_buffers]
-        N_list = [ep_info["N"] for ep_info in ep_buffers]
-        C_gamma_N_list = [ep_info["C_gamma_N"] for ep_info in ep_buffers]
-        C_gamma_inf_list = [ep_info["C_gamma_inf"] for ep_info in ep_buffers]
+        ctr_list       = [ep["avg_ctrl_effort"]  for ep in ep_buffers]
+        mauc_list      = [ep["mauc"]              for ep in ep_buffers]
+        inf_list       = [ep["avg_inf_time"]      for ep in ep_buffers]
+        overshoot_list = [ep["overshoot"]         for ep in ep_buffers]
+        lbd_list       = [ep["contraction_rate"]  for ep in ep_buffers]
+        init_cost_list = [ep["init_cost"]         for ep in ep_buffers]
 
-        ret_mean, _ = self.mean_confidence_interval(rew_list)
-        mauc_mean, _ = self.mean_confidence_interval(mauc_list)
-        ctrl_mean, _ = self.mean_confidence_interval(ctr_list)
-        inf_mean_total, _ = self.mean_confidence_interval(inf_list)
-        overshoot_mean, _ = self.mean_confidence_interval(overshoot_list)
-        lbd_mean, _ = self.mean_confidence_interval(lbd_list)
-        N_mean_total, _ = self.mean_confidence_interval(N_list)
-        C_gamma_N_mean_total, _ = self.mean_confidence_interval(C_gamma_N_list)
-        C_gamma_inf_mean_total, _ = self.mean_confidence_interval(C_gamma_inf_list)
+        mauc_mean, _        = self.mean_confidence_interval(mauc_list)
+        ctrl_mean, _        = self.mean_confidence_interval(ctr_list)
+        inf_mean_total, _   = self.mean_confidence_interval(inf_list)
+        overshoot_mean, _   = self.mean_confidence_interval(overshoot_list)
+        lbd_mean, _         = self.mean_confidence_interval(lbd_list)
+        init_cost_total     = float(np.mean(init_cost_list))
+
+        # --- Contraction flag ---------------------------------------------------
+        # Flag = 1 when the empirical overshoot C exceeds the theoretical bound:
+        #   C3M  :  √(w_ub / w_lb) · ‖e(0)‖
+        #   RL   :  (1 / (1 − γ)) · √(w_ub / w_lb) · ‖e(0)‖
+        policy_name = (
+            self.policy.__class__.__name__.lower()
+            if hasattr(self, "policy")
+            else ""
+        )
+        gamma      = getattr(self.policy, "gamma", 1.0)
+        w_ub       = float(getattr(self.policy, "w_ub", 1.0))
+        w_lb       = float(getattr(self.policy, "w_lb", 1.0))
+        sqrt_cond  = np.sqrt(w_ub / (w_lb + 1e-12))
+        if policy_name == "c3m":
+            theo_bound = sqrt_cond * init_cost_total
+        else:
+            theo_bound = (1.0 / max(1.0 - gamma, 1e-8)) * sqrt_cond * init_cost_total
+        contraction_flag = float(overshoot_mean > theo_bound)
 
         eval_dict = {
-            "eval/return": ret_mean,
-            "eval/mauc": mauc_mean,
-            "eval/control_effort": ctrl_mean,
-            "eval/inference_time_s": inf_mean_total,
-            "eval/inference_time_ms": inf_mean_total * 1e3,
-            "eval/overshoot": overshoot_mean,
-            "eval/contraction_rate": lbd_mean,
-            "eval/N": N_mean_total,
-            "eval/C_gamma_inf": C_gamma_inf_mean_total,
+            "eval/auc":               mauc_mean,
+            "eval/control_effort":    ctrl_mean,
+            "eval/contraction_rate":  lbd_mean,
+            "eval/latency_ms":        inf_mean_total * 1e3,
             "eval/performance_score": lbd_mean / (overshoot_mean + 1e-8),
+            "eval/contraction_flag":  contraction_flag,
         }
-        
-        policy_name = self.policy.__class__.__name__.lower() if hasattr(self, "policy") else ""
-        if policy_name == "c3m":
-            provided_lbd = getattr(self.eval_env, "lbd", getattr(self.policy, "lbd", 0.0))
-            eval_dict["eval/contraction_rate_diff"] = lbd_mean - provided_lbd
 
-
-        if not np.isnan(C_gamma_N_mean_total):
-            eval_dict["eval/C_gamma_N"] = C_gamma_N_mean_total
-
-        # C3M / CARL / CORL η-verification metrics (aggregated over references).
-        if self.policy.__class__.__name__.lower() in ("c3m", "carl", "corl"):
-            eta_keys = [
-                "eval/eta_alpha", "eval/eta_emp",
-                "eval/eta_threshold", "eval/eta_theorem_ok", "eval/eta_violation_rate",
-            ]
-            for key in eta_keys:
-                vals = [b[key] for b in ep_buffers if key in b and not np.isnan(b[key])]
-                if vals:
-                    eval_dict[key], _ = self.mean_confidence_interval(vals)
-
-        # CORL value-contraction certification metrics (aggregated over references).
-        if self.policy.__class__.__name__.lower() == "corl":
-            vc_keys = [
-                "vc_rate_min",
-                "vc_rate_max",
-                "vc_rate_avg",
-                "vc_rate_p95",
-                "vc_rate_guaranteed_95",
-                "vc_violation_rate",
-                "vc_violation_magnitude",
-            ]
-            for key in vc_keys:
-                vals = [b[key] for b in ep_buffers if key in b and not np.isnan(b[key])]
-                if len(vals) > 0:
-                    eval_dict[f"eval/{key}"], _ = self.mean_confidence_interval(vals)
-
-        supp_dict = {f"eval/path_tracking_result": fig}
+        supp_dict = {"eval/path_tracking_result": fig}
         if self.rendering and len(video_frames) > 0:
             supp_dict["eval/video"] = np.array(video_frames)
 
@@ -644,7 +597,16 @@ class Evaluator:
         dimension: int,
         C: float,
         lbd: float,
+        init_cost: float = 1.0,
     ):
+        """Plot path tracking results and normalised tracking error.
+
+        The right panel (ax2) shows:
+          - each episode's normalised error trajectory
+          - the fitted exponential envelope  C · exp(−λ t)  (black dashed)
+          - the theoretical upper bound (red dashed) derived from contraction
+            theory, so violations are immediately visible.
+        """
         assert dimension in [1, 2, 3], "Dimension must be 1, 2, or 3."
 
         # Set subplot parameters based on dimension
@@ -666,7 +628,6 @@ class Evaluator:
         ax1.scatter(
             *first_point,
             marker="*",
-            # alpha=0.7,
             c="black",
             s=80.0,
         )
@@ -709,25 +670,77 @@ class Evaluator:
         ax1.set_title("Path Tracking Results", fontsize=18)
         ax1.grid(True, linestyle="--", alpha=0.6)
 
-        # calculate the mean and std of the traj norm error to make plot
-        i = 0
+        # ── Right panel: normalised tracking error + theory bound ──────────────
         timesteps = np.array(range(self.eval_env.episode_len)) * self.eval_env.dt
-        for traj in error_trajectories:
+
+        for i, traj in enumerate(error_trajectories):
             ax2.plot(
                 timesteps[: len(traj)],
                 traj,
                 c=COLORS[str(i)],
+                alpha=0.8,
             )
-            i += 1
-        # plot baseline exponential decay curves
-        ax2.plot(timesteps, C * np.exp(-lbd * timesteps), linestyle="--", c="black")
-        ax2.set_xlabel("Time (s)", fontsize=16)
-        ax2.set_ylabel(r"$||x(t)-x^*(t)||_2 / ||x(0) - x^*(0)||_2$", fontsize=16)
 
+        # Fitted empirical envelope: C · exp(−λ t)
+        ax2.plot(
+            timesteps,
+            C * np.exp(-lbd * timesteps),
+            linestyle="--",
+            c="black",
+            linewidth=1.5,
+            label=rf"Fitted: $C={C:.2f}$, $\lambda={lbd:.2f}$",
+        )
+
+        # Theoretical upper bound from contraction theory
+        # relative error uses init_cost in the denominator, so the bound on the
+        # *normalised* error is just:  factor · exp(−λ_design · t)
+        # where factor = √(w_ub/w_lb) for C3M, or (1/(1-γ))√(w_ub/w_lb) for RL.
+        policy_name = (
+            self.policy.__class__.__name__.lower()
+            if hasattr(self, "policy")
+            else ""
+        )
+        gamma  = getattr(self.policy, "gamma", 1.0)
+        w_ub   = float(getattr(self.policy, "w_ub", None) or 1.0)
+        w_lb   = float(getattr(self.policy, "w_lb", None) or 1.0)
+        lbd_design = float(getattr(self.policy, "lbd", lbd))
+        sqrt_cond  = np.sqrt(w_ub / (w_lb + 1e-12))
+        if policy_name == "c3m":
+            theo_factor = sqrt_cond
+            bound_label = (
+                rf"Theory: $\sqrt{{w_{{ub}}/w_{{lb}}}}\cdot\|e_0\|\,e^{{-\lambda t}}$"
+            )
+        else:
+            theo_factor = (1.0 / max(1.0 - gamma, 1e-8)) * sqrt_cond
+            bound_label = (
+                rf"Theory: $\frac{{1}}{{1-\gamma}}\sqrt{{w_{{ub}}/w_{{lb}}}}\cdot\|e_0\|\,e^{{-\lambda t}}$"
+            )
+
+        # Normalise by init_cost so the bound is on the *relative* error plot
+        theo_curve = (
+            theo_factor * np.exp(-lbd_design * timesteps)
+            if init_cost < 1e-8
+            else theo_factor * init_cost * np.exp(-lbd_design * timesteps) / init_cost
+        )
+        # Simplifies to: theo_factor * exp(-lbd_design * t)
+        theo_curve = theo_factor * np.exp(-lbd_design * timesteps)
+
+        ax2.plot(
+            timesteps,
+            theo_curve,
+            linestyle="-.",
+            color="crimson",
+            linewidth=1.5,
+            label=bound_label,
+        )
+
+        ax2.set_xlabel("Time (s)", fontsize=16)
+        ax2.set_ylabel(r"$\|x(t)-x^*(t)\|_2 / \|x(0)-x^*(0)\|_2$", fontsize=16)
         ax2.set_title(
-            rf"Normalized Tracking Error (C={C:.2f}, $\lambda$={lbd:.2f})",
+            rf"Normalised Tracking Error ($\lambda_{{design}}={lbd_design:.2f}$)",
             fontsize=18,
         )
+        ax2.legend(fontsize=9)
         ax2.grid(True, linestyle="--", alpha=0.6)
 
         plt.tight_layout()

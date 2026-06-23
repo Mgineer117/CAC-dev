@@ -64,7 +64,7 @@ class OnlineTrainer(Evaluator):
             # Manual logging
             self.write_log(eval_dict, step=step_count, eval_log=eval_log)
             self.write_image(supp_dict, step=step_count)
-            self.last_auc_mean.append(eval_dict[f"eval/mauc"])
+            self.last_auc_mean.append(eval_dict[f"eval/auc"])
             self.save_model(step_count)
 
             # Return policy to train mode after eval

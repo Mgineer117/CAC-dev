@@ -168,16 +168,27 @@ class BaseEnv(gym.Env):
         )
 
     def get_transition(self, x: np.ndarray, u: np.ndarray):
-        """Compute the next state given current state x and action u."""
+        """Compute the next state given current state x and action u.
+
+        Boundary handling: all state dims transition normally. If the resulting
+        next position would exceed X bounds, only the position dims are reverted
+        to their previous values — velocities, angles, and all other dims still
+        advance. Episodes never terminate due to boundary violations.
+        """
         x_dot = self.get_dynamics(x, u)
         next_x = x + self.dt * x_dot
+
+        # Revert only position dims when next position is out-of-bounds.
+        pos_min = self.X_MIN.flatten()[: self.pos_dimension]
+        pos_max = self.X_MAX.flatten()[: self.pos_dimension]
+        next_pos = next_x[: self.pos_dimension]
+        if np.any(next_pos < pos_min) or np.any(next_pos > pos_max):
+            next_x[: self.pos_dimension] = x[: self.pos_dimension]
+
         next_x_wrapped = self.wrap_angles(next_x)
 
-        termination = np.any(
-            x[: self.pos_dimension] <= self.X_MIN.flatten()[: self.pos_dimension]
-        ) or np.any(
-            x[: self.pos_dimension] >= self.X_MAX.flatten()[: self.pos_dimension]
-        )
+        # Episodes only end by time-truncation, never by boundary violation.
+        termination = False
         truncation = self.time_steps == self.episode_len - 1
 
         return next_x, next_x_wrapped, termination, truncation, x_dot

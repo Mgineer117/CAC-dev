@@ -90,7 +90,7 @@ class C3MTrainer(Evaluator):
                     # Manual logging
                     self.write_log(eval_dict, step=logging_step, eval_log=True)
                     self.write_image(supp_dict, step=logging_step)
-                    self.last_auc_mean.append(eval_dict[f"eval/mauc"])
+                    self.last_auc_mean.append(eval_dict[f"eval/auc"])
 
                     self.save_model(logging_step)
 

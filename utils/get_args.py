@@ -77,7 +77,7 @@ def get_args():
     # --- network architecture ---
     p.add_argument("--dynamic-dim", type=list, default=[256, 256], help="Dynamics net hidden dims.")
     p.add_argument("--cmg-hidden-dims", type=list, default=[128, 128])
-    p.add_argument("--cmg-activation", type=str, default="tanh", help="['tanh', 'relu', 'siren'].")
+    p.add_argument("--cmg-activation", type=str, default="tanh", help="['tanh', 'relu'].")
     p.add_argument("--sdc-dim", type=list, default=[256, 256], help="SDC net hidden dims.")
     p.add_argument("--actor-dim", type=list, default=[64, 64])
     p.add_argument("--actor-activation", type=str, default="tanh", help="['tanh', 'relu', 'elu', 'leaky_relu', 'gelu'].")

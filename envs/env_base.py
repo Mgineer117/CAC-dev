@@ -369,8 +369,8 @@ class BaseEnv(gym.Env):
         pass
 
     def render(self, mode="human"):
+        import matplotlib.pyplot as plt
         if not hasattr(self, "fig"):
-            import matplotlib.pyplot as plt
             if mode == "rgb_array":
                 plt.switch_backend('Agg')
             elif mode == "human":
@@ -386,7 +386,6 @@ class BaseEnv(gym.Env):
 
         self.ax.clear()
         self.ax_err.clear()
-        import numpy as np
 
         # Calculate Contraction Bounds
         bound = None
@@ -405,7 +404,6 @@ class BaseEnv(gym.Env):
                     if np.min(np.real(eigvals)) > 0:
                         cond = np.sqrt(np.max(np.real(eigvals)) / np.min(np.real(eigvals)))
                 elif hasattr(self.policy, "CMG") and hasattr(self, "x_0"):
-                    import torch
                     x0 = torch.tensor(self.x_0, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
                     W = self.policy.CMG(x0)[0].detach().squeeze(0).cpu().numpy()
                     M = W.T @ W
@@ -414,7 +412,6 @@ class BaseEnv(gym.Env):
                         cond = np.sqrt(np.max(np.real(eigvals)) / np.min(np.real(eigvals)))
             elif policy_name in ["carl", "trpo", "cpo", "ppo", "cac"]:
                 if hasattr(self.policy, "CMG") and hasattr(self, "x_0"):
-                    import torch
                     x0 = torch.tensor(self.x_0, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
                     W = self.policy.CMG(x0)[0].detach().squeeze(0).cpu().numpy()
                     M = W.T @ W
@@ -538,9 +535,10 @@ class BaseEnv(gym.Env):
                         cur_z_rt = cur_ref_pos[2] + cur_rt_b_t * np.cos(v_grid)
                         self.ax.plot_wireframe(cur_x_rt, cur_y_rt, cur_z_rt, color="red", alpha=0.5, label='Current RT Bound')
             else:
-                self.ax.set_xlim(self.X_MIN[0], self.X_MAX[0])
-                self.ax.set_ylim(self.X_MIN[1], self.X_MAX[1])
-                self.ax.set_zlim(self.X_MIN[2], self.X_MAX[2])
+                xmin, xmax = self.X_MIN.flatten(), self.X_MAX.flatten()
+                self.ax.set_xlim(xmin[0], xmax[0])
+                self.ax.set_ylim(xmin[1], xmax[1])
+                self.ax.set_zlim(xmin[2], xmax[2])
 
         else:
             # 1D or 2D
@@ -579,7 +577,6 @@ class BaseEnv(gym.Env):
                     self.ax.set_ylim(np.min(self.xref[:, 1]) - margin, np.max(self.xref[:, 1]) + margin)
 
                 if bound is not None:
-                    import matplotlib.pyplot as plt
                     step = max(1, self.episode_len // 50)
                     for t in range(0, self.episode_len, step):
                         ref_pos = self.xref[t, :2]
@@ -614,9 +611,10 @@ class BaseEnv(gym.Env):
                         cur_rt_circle = plt.Circle((cur_ref_pos[0], cur_ref_pos[1] if self.pos_dimension > 1 else 0.0), cur_rt_b_t, color='red', fill=False, linewidth=2.0, linestyle=':', label='Current RT Bound')
                         self.ax.add_patch(cur_rt_circle)
             else:
-                self.ax.set_xlim(self.X_MIN[0], self.X_MAX[0])
+                xmin, xmax = self.X_MIN.flatten(), self.X_MAX.flatten()
+                self.ax.set_xlim(xmin[0], xmax[0])
                 if self.pos_dimension > 1:
-                    self.ax.set_ylim(self.X_MIN[1], self.X_MAX[1])
+                    self.ax.set_ylim(xmin[1], xmax[1])
                 
         # Add timestep to title
         if hasattr(self, "time_steps"):
@@ -648,16 +646,13 @@ class BaseEnv(gym.Env):
             self.ax_err.legend(loc='upper right')
         
         if mode == "human":
-            import matplotlib.pyplot as plt
             plt.draw()
             plt.pause(0.001)
         elif mode == "rgb_array":
-            import io
-            from PIL import Image
             self.fig.canvas.draw()
             buf = self.fig.canvas.buffer_rgba()
             img = np.asarray(buf)
-            return img[:, :, :3].copy()  # Return a copy of RGB so it doesn't share memory with the canvas buffer
+            return img[:, :, :3].copy()
 
     def get_rewards(self, u):
         error = self.x_t - self.xref[self.time_steps]
@@ -665,7 +660,6 @@ class BaseEnv(gym.Env):
 
         policy_name = self.policy.__class__.__name__.lower() if hasattr(self, "policy") else ""
         if policy_name == "carl" and self.reward_mode != "inverse":
-            import torch
             with torch.no_grad():
                 x_tensor = torch.tensor(self.x_t, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
                 W = self.policy.CMG(x_tensor)[0].squeeze(0).cpu().numpy()

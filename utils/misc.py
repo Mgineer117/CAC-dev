@@ -128,7 +128,7 @@ def arch_sweep_parameters(include_cmg: bool = True, include_actor: bool = True) 
     if include_cmg:
         params["cmg_width"] = {"values": ARCH_WIDTHS}
         params["cmg_depth"] = {"values": ARCH_DEPTHS}
-        params["cmg_activation"] = {"values": ["tanh", "relu", "siren"]}
+        params["cmg_activation"] = {"values": ["tanh", "relu"]}
     if include_actor:
         params["actor_width"] = {"values": ARCH_WIDTHS}
         params["actor_depth"] = {"values": ARCH_DEPTHS}

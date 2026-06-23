@@ -242,10 +242,6 @@ class NCM(Base):
             f"{self.name}/cvstem/J": self.cvstem_info["J"],
         }
         loss_dict.update(grad_dict)
-        norm_dict = self.compute_weight_norm(
-            [self.metric_net], ["metric_net"], dir=self.name, device=self.device
-        )
-        loss_dict.update(norm_dict)
 
         self.eval()
         update_time = time.time() - t0

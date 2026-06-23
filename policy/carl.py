@@ -436,21 +436,13 @@ class CARL(Base):
             f"{self.name}/CMG_loss/c2_loss": infos["c2_loss"].item(),
             f"{self.name}/CMG_loss/overshoot_loss": infos["overshoot_loss"].item(),
             f"{self.name}/CMG_loss/entropy_loss": infos["entropy_loss"].item(),
-            f"{self.name}/CMG_analytics/lbd": self.lbd,
             f"{self.name}/lr/W_lr": self.W_lr_scheduler.get_last_lr()[0],
             f"{self.name}/CMG_analytics/W_frozen": float(
                 self.stop_W_training
             ),  # Log status
         }
 
-        norm_dict = self.compute_weight_norm(
-            [self.CMG],
-            ["CMG"],
-            dir=f"{self.name}",
-            device=self.device,
-        )
         loss_dict.update(grad_dict)
-        loss_dict.update(norm_dict)
 
         # Cleanup
         self.eval()
@@ -468,7 +460,7 @@ class CARL(Base):
         states = self.to_tensor(batch["states"])
         controls = self.to_tensor(batch["controls"])
         original_rewards = self.to_tensor(batch["rewards"])
-        rewards, reward_ratio = self.get_rewards(states, controls)
+        rewards, _ = self.get_rewards(states, controls)
         terminations = self.to_tensor(batch["terminations"])
         old_logprobs = self.to_tensor(batch["logprobs"])
 
@@ -568,17 +560,9 @@ class CARL(Base):
             f"{self.name}/RL_analytics/corrected_avg_rewards": torch.mean(
                 rewards
             ).item(),
-            f"{self.name}/RL_analytics/reward_ratio": reward_ratio,
         }
         grad_dict = self.average_dict_values(grad_dicts)
-        norm_dict = self.compute_weight_norm(
-            [self.actor, self.critic],
-            ["actor", "critic"],
-            dir=f"{self.name}",
-            device=self.device,
-        )
         loss_dict.update(grad_dict)
-        loss_dict.update(norm_dict)
 
         # Cleanup
         del states, controls, rewards, terminations, old_logprobs

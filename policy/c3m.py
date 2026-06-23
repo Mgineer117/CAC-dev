@@ -382,14 +382,7 @@ class C3M(SDLQRPretrainMixin, Base):
             f"{self.name}/lr/W_lr": self.lr_scheduler.get_last_lr()[0],
             f"{self.name}/lr/u_lr": self.lr_scheduler.get_last_lr()[1],
         }
-        norm_dict = self.compute_weight_norm(
-            [self.CMG, self.actor],
-            ["CMG", "actor"],
-            dir=f"{self.name}",
-            device=self.device,
-        )
         loss_dict.update(grad_dict)
-        loss_dict.update(norm_dict)
 
         # === CLEANUP === #
         self.eval()

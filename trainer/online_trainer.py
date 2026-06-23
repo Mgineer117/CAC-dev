@@ -91,20 +91,11 @@ class OnlineTrainer(Evaluator):
                     batch, progress=step / total_timesteps
                 )
 
-                # Calculate expected remaining time
                 pbar.update(batch["rewards"].shape[0])
 
-                elapsed_time = time.time() - start_time
-                avg_time_per_iter = elapsed_time / step
-                remaining_time = avg_time_per_iter * (self.epochs - step)
-
-                # Update environment steps and calculate time metrics
                 loss_dict[f"{self.policy.name}/RL_analytics/timesteps"] = step
                 loss_dict[f"{self.policy.name}/RL_analytics/sample_time"] = sample_time
                 loss_dict[f"{self.policy.name}/RL_analytics/update_time"] = update_time
-                loss_dict[f"{self.policy.name}/RL_analytics/remaining_time (hr)"] = (
-                    remaining_time / 3600
-                )  # Convert to hours
 
                 self.write_log(loss_dict, step=step)
                 self.write_image(

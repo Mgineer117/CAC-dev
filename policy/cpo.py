@@ -394,14 +394,6 @@ class CPO(Base):
             f"{self.name}/RL_analytics/num_backtracks": i,
             f"{self.name}/RL_analytics/cost_limit": limit,
         }
-        norm_dict = self.compute_weight_norm(
-            [self.actor],
-            ["actor"],
-            dir=f"{self.name}",
-            device=self.device,
-        )
-        loss_dict.update(norm_dict)
-
         return loss_dict, {}, time.time() - t0
 
     def find_exponential_curve(self, track_M_metric, terminations, truncations):

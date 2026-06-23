@@ -198,14 +198,7 @@ class PPO(Base):
             f"{self.name}/RL_analytics/avg_rewards": torch.mean(rewards).item(),
         }
         grad_dict = self.average_dict_values(grad_dicts)
-        norm_dict = self.compute_weight_norm(
-            [self.actor, self.critic],
-            ["actor", "critic"],
-            dir=f"{self.name}",
-            device=self.device,
-        )
         loss_dict.update(grad_dict)
-        loss_dict.update(norm_dict)
 
         self.ppo_lr_scheduler.step()
 

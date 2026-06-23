@@ -108,7 +108,7 @@ if __name__ == "__main__":
                 "c3m_pretrain_c1c2": {
                     "values": [True, False]
                 },
-                **arch_sweep_parameters(include_cmg=True, include_actor=False),
+                **arch_sweep_parameters(include_cmg=False, include_actor=True),
             }
         }
 

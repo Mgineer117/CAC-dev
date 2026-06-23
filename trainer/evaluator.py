@@ -114,6 +114,22 @@ class Evaluator:
             )
         )
 
+    def _compute_mahal_cost(self, x_np: np.ndarray, e_np: np.ndarray) -> float:
+        """Mahalanobis cost C = e^T M(x) e using the policy CMG."""
+        with torch.no_grad():
+            x_t = self.policy.to_tensor(x_np).unsqueeze(0)
+            raw_W, _ = self.policy.CMG(x_t)
+            W = self.policy._bound_W(raw_W)
+            I = torch.eye(
+                self.policy.x_dim,
+                device=self.policy.device,
+                dtype=self.policy._dtype,
+            )
+            M = torch.linalg.solve(W, I.unsqueeze(0))[0]
+            e_t = torch.from_numpy(e_np).to(self.policy._dtype).to(self.policy.device)
+            C = (e_t @ M @ e_t).item()
+        return max(C, 1e-30)
+
     def evaluate(self):
         """
         Given one ref, show tracking performance.
@@ -130,9 +146,17 @@ class Evaluator:
         ep_buffers = []
         video_frames = []
 
+        policy_name = (
+            self.policy.__class__.__name__.lower()
+            if hasattr(self, "policy")
+            else ""
+        )
+        is_carl_m = policy_name == "carl_m"
+
         # find mean and CI of data with tqdm that disappears afterward
         for i in tqdm(range(self.eval_num), desc="Evaluating", leave=False):
             track_traj, ref_traj, error_traj, ep_buffer = [], [], [], []
+            all_ep_mahal_trajs = []  # only populated for CARL_M
             for j in range(self.eval_episodes):
                 # Env initialization
                 options = None if j == 0 else {"replace_x_0": True, "eval_mode": True}
@@ -141,6 +165,15 @@ class Evaluator:
                 # Episode variables
                 ep_ctrl_effort, ep_inf_time = 0, 0
                 ep_track_traj, ep_error_traj = [], []
+                ep_mahal_costs = []
+
+                # C_0 = e_0^T M(x_0) e_0 for the CARL_M accelerated bound
+                if is_carl_m:
+                    x0 = infos["x"]
+                    e0 = self.eval_env.wrap_angles(x0 - self.eval_env.xref[0])
+                    C_0 = self._compute_mahal_cost(x0, e0)
+                else:
+                    C_0 = 1.0
 
                 # Episode rollout
                 for t in range(1, self.eval_env.episode_len + 1):
@@ -170,6 +203,14 @@ class Evaluator:
                     if j == 0:
                         ref_traj.append(self.eval_env.xref[t, :dimension])
 
+                    # Per-step Mahalanobis cost for CARL_M accelerated bound
+                    if is_carl_m:
+                        x_curr = infos["x"]
+                        e_curr = self.eval_env.wrap_angles(x_curr - self.eval_env.xref[t])
+                        ep_mahal_costs.append(
+                            self._compute_mahal_cost(x_curr, e_curr) / C_0
+                        )
+
                     # === Termination logic === #
                     if done:
                         auc = np.trapezoid(ep_error_traj, dx=self.eval_env.dt)
@@ -187,6 +228,8 @@ class Evaluator:
                         )
                         track_traj.append(ep_track_traj)
                         error_traj.append(ep_error_traj)
+                        if is_carl_m:
+                            all_ep_mahal_trajs.append(ep_mahal_costs)
 
                         break
 
@@ -203,9 +246,19 @@ class Evaluator:
 
             C, lbd = self.compute_contraction_rate(error_traj)
 
+            # Average Mahalanobis cost trajectory across episodes for CARL_M bound
+            if is_carl_m and all_ep_mahal_trajs:
+                min_len = min(len(t) for t in all_ep_mahal_trajs)
+                avg_mahal = np.mean(
+                    [t[:min_len] for t in all_ep_mahal_trajs], axis=0
+                )
+            else:
+                avg_mahal = None
+
             if i == 0:
                 fig = self.plot_trajectories(
-                    track_traj, error_traj, dimension, C, lbd
+                    track_traj, error_traj, dimension, C, lbd,
+                    mahal_cost_ratio_traj=avg_mahal,
                 )
 
             ep_buffers.append(
@@ -236,13 +289,8 @@ class Evaluator:
 
         # --- Contraction flag ---------------------------------------------------
         # Flag = 1 when the empirical overshoot C exceeds the theoretical bound:
-        #   C3M  :  √(w_ub / w_lb) · ‖e(0)‖
-        #   RL   :  (1 / (1 − γ)) · √(w_ub / w_lb) · ‖e(0)‖
-        policy_name = (
-            self.policy.__class__.__name__.lower()
-            if hasattr(self, "policy")
-            else ""
-        )
+        #   C3M    :  √(w_ub / w_lb) · ‖e(0)‖
+        #   RL     :  (1 / (1 − γ)) · √(w_ub / w_lb) · ‖e(0)‖
         gamma      = getattr(self.policy, "gamma", 1.0)
         w_ub       = float(getattr(self.policy, "w_ub", 1.0))
         w_lb       = float(getattr(self.policy, "w_lb", 1.0))
@@ -346,14 +394,16 @@ class Evaluator:
         dimension: int,
         C: float,
         lbd: float,
+        mahal_cost_ratio_traj: np.ndarray | None = None,
     ):
         """Plot path tracking results and normalised tracking error.
 
         The right panel (ax2) shows:
           - each episode's normalised error trajectory
           - the fitted exponential envelope  C · exp(−λ t)  (black dashed)
-          - the theoretical upper bound (red dashed) derived from contraction
-            theory, so violations are immediately visible.
+          - the theoretical upper bound (red/blue dashed) from contraction theory
+          - for CARL_M: the accelerated IES bound from Theorem (Accelerated IES),
+            using the running-average contraction rate λ̄(0,k).
         """
         assert dimension in [1, 2, 3], "Dimension must be 1, 2, or 3."
 
@@ -440,40 +490,48 @@ class Evaluator:
         )
 
         # Theoretical upper bound from contraction theory
-        # relative error uses init_cost in the denominator, so the bound on the
-        # *normalised* error is just:  factor · exp(−λ_design · t)
-        # where factor = √(w_ub/w_lb) for C3M, or (1/(1-γ))√(w_ub/w_lb) for RL.
         policy_name = (
             self.policy.__class__.__name__.lower()
             if hasattr(self, "policy")
             else ""
         )
-        gamma  = getattr(self.policy, "gamma", 1.0)
-        w_ub   = float(getattr(self.policy, "w_ub", None) or 1.0)
-        w_lb   = float(getattr(self.policy, "w_lb", None) or 1.0)
+        gamma      = getattr(self.policy, "gamma", 1.0)
+        w_ub       = float(getattr(self.policy, "w_ub", None) or 1.0)
+        w_lb       = float(getattr(self.policy, "w_lb", None) or 1.0)
         lbd_design = float(getattr(self.policy, "lbd", lbd))
-        sqrt_cond  = np.sqrt(w_ub / (w_lb + 1e-12))
-        if policy_name == "c3m":
-            theo_factor = sqrt_cond
-            bound_label = (
-                rf"Theory: $\sqrt{{w_{{ub}}/w_{{lb}}}}\cdot\|e_0\|\,e^{{-\lambda t}}$"
-            )
-        else:
-            theo_factor = (1.0 / max(1.0 - gamma, 1e-8)) * sqrt_cond
-            bound_label = (
-                rf"Theory: $\frac{{1}}{{1-\gamma}}\sqrt{{w_{{ub}}/w_{{lb}}}}\cdot\|e_0\|\,e^{{-\lambda t}}$"
-            )
+        cond       = w_ub / (w_lb + 1e-12)
 
-        theo_curve = theo_factor * np.exp(-lbd_design * timesteps)
+        if policy_name == "c3m":
+            theo_factor = np.sqrt(cond)
+            bound_label = rf"Theory: $\sqrt{{w_{{ub}}/w_{{lb}}}}\,e^{{-\lambda t}}$"
+        else:
+            theo_factor = (1.0 / max(1.0 - gamma, 1e-8)) * np.sqrt(cond)
+            bound_label = rf"Theory (std): $\frac{{1}}{{1-\gamma}}\sqrt{{w_{{ub}}/w_{{lb}}}}\,e^{{-\lambda t}}$"
 
         ax2.plot(
             timesteps,
-            theo_curve,
+            theo_factor * np.exp(-lbd_design * timesteps),
             linestyle="-.",
             color="crimson",
             linewidth=1.5,
             label=bound_label,
         )
+
+        # Accelerated IES bound for CARL_M (Theorem: Accelerated IES).
+        # C(s_k) ≤ β(s_0) C(s_0) exp(−2 λ̄(0,k) k Δt), where λ̄ is the
+        # running average of Λ(s_{k'}).  Bounding ‖e‖²/‖e_0‖² via metric
+        # eigenvalues gives:  bound(k) = (w_ub/w_lb) · C_k/C_0
+        # where C_k/C_0 = mahal_cost_ratio_traj[k] is pre-computed per step.
+        if policy_name == "carl_m" and mahal_cost_ratio_traj is not None and len(mahal_cost_ratio_traj) > 0:
+            accel_bound = cond * np.asarray(mahal_cost_ratio_traj)
+            ax2.plot(
+                timesteps[: len(accel_bound)],
+                accel_bound,
+                linestyle="--",
+                color="navy",
+                linewidth=1.8,
+                label=rf"Theory (accel.): $(w_{{ub}}/w_{{lb}})\,C_k/C_0$",
+            )
 
         ax2.set_xlabel("Time (s)", fontsize=16)
         ax2.set_ylabel(r"$\|x(t)-x^*(t)\|_2 / \|x(0)-x^*(0)\|_2$", fontsize=16)

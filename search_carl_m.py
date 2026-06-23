@@ -5,7 +5,6 @@ import wandb
 import torch
 
 from utils.get_args import get_args
-from utils.misc import apply_arch_config, arch_sweep_parameters
 from main import run
 
 
@@ -35,8 +34,6 @@ def train():
         args.c3m_pretrain_cmg = config.c3m_pretrain_cmg
     if "c3m_pretrain_c1c2" in config:
         args.c3m_pretrain_c1c2 = config.c3m_pretrain_c1c2
-
-    apply_arch_config(args, config)
 
     unique_id = str(uuid.uuid4())[:4]
     exp_time = datetime.datetime.now().strftime("%m-%d_%H-%M-%S.%f")
@@ -108,7 +105,6 @@ if __name__ == "__main__":
                 "c3m_pretrain_c1c2": {
                     "values": [True, False]
                 },
-                **arch_sweep_parameters(include_cmg=False, include_actor=True),
             }
         }
 

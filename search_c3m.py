@@ -5,7 +5,6 @@ import wandb
 import torch
 
 from utils.get_args import get_args
-from utils.misc import apply_arch_config, arch_sweep_parameters
 from main import run
 
 def train():
@@ -33,17 +32,12 @@ def train():
         args.c3m_pretrain_c1c2 = bool(config.c3m_pretrain_c1c2) and pretrain_cmg_active
 
     # --- fixed CMG configuration (no longer searched) ---
-    # Bounded eigenvalue-sigmoid CMG with a SIREN backbone, depth-2 / width-256,
-    # fixed contraction-metric bounds and learning rates.
-    args.cmg_activation = "siren"
+    args.cmg_activation = "tanh"
     args.cmg_hidden_dims = [256, 256]
     args.u_lr = 1e-4
     args.W_lr = 3e-4
     args.w_lb = 0.05
     args.w_ub = 100.0
-
-    # Override actor architecture (width, depth, activation) from the sweep config.
-    apply_arch_config(args, config)
 
     # Setup for the trial run
     unique_id = str(uuid.uuid4())[:4]
@@ -118,12 +112,6 @@ if __name__ == "__main__":
                 "c3m_pretrain_c1c2": {
                     "values": [True, False]
                 },
-                # Actor architecture only (width, depth, activation); the CMG
-                # configuration is fixed in train(), so it is not searched.
-                **arch_sweep_parameters(include_cmg=False, include_actor=True),
-                # C3M's CLActor supports SIREN, so add it as an activation option
-                # (overrides the actor_activation list from arch_sweep_parameters).
-                "actor_activation": {"values": ["tanh", "relu", "elu", "siren"]},
             }
         }
 

@@ -59,7 +59,7 @@ class Evaluator:
         self.eval_interval = int(epochs / self.log_interval)
 
         # initialize the essential training components
-        self.last_min_auc_mean = 1e10
+        self.last_max_perf_score = 0.0
 
         self.eval_num = eval_num
         self.eval_episodes = eval_episodes

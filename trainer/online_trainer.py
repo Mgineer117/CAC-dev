@@ -54,7 +54,7 @@ class OnlineTrainer(Evaluator):
     def train(self) -> dict[str, float]:
         start_time = time.time()
 
-        self.last_auc_mean = deque(maxlen=1)
+        self.last_perf_score = deque(maxlen=1)
 
         # Define a helper function to avoid code duplication
         def run_eval(step_count, eval_log=True):
@@ -64,7 +64,7 @@ class OnlineTrainer(Evaluator):
             # Manual logging
             self.write_log(eval_dict, step=step_count, eval_log=eval_log)
             self.write_image(supp_dict, step=step_count)
-            self.last_auc_mean.append(eval_dict[f"eval/auc"])
+            self.last_perf_score.append(eval_dict["eval/performance_score"])
             self.save_model(step_count)
 
             # Return policy to train mode after eval
@@ -136,12 +136,12 @@ class OnlineTrainer(Evaluator):
             model = deepcopy(model).to("cpu")
             torch.save(model.state_dict(), path)
 
-            # save the best model
-            if np.mean(self.last_auc_mean) < self.last_min_auc_mean:
+            # save the best model when performance_score (λ/C) improves
+            if np.mean(self.last_perf_score) > self.last_max_perf_score:
                 name = f"best_model.pth"
                 path = os.path.join(self.logger.log_dir, name)
                 torch.save(model.state_dict(), path)
 
-                self.last_min_auc_mean = np.mean(self.last_auc_mean)
+                self.last_max_perf_score = np.mean(self.last_perf_score)
         else:
             raise ValueError("Error: Model is not identifiable!!!")

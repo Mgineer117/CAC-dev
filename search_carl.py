@@ -5,7 +5,6 @@ import wandb
 import torch
 
 from utils.get_args import get_args
-from utils.misc import apply_arch_config, arch_sweep_parameters
 from main import run
 
 def train():
@@ -38,9 +37,6 @@ def train():
         args.c3m_pretrain_cmg = config.c3m_pretrain_cmg
     if "c3m_pretrain_c1c2" in config:
         args.c3m_pretrain_c1c2 = config.c3m_pretrain_c1c2
-
-    # Override CMG / actor architecture (width, depth, activation)
-    apply_arch_config(args, config)
 
     # Setup for the trial run
     unique_id = str(uuid.uuid4())[:4]
@@ -136,8 +132,6 @@ if __name__ == "__main__":
                 "c3m_pretrain_c1c2": {
                     "values": [True, False]
                 },
-                # CMG + actor architecture (width, depth, activation)
-                **arch_sweep_parameters(include_cmg=True, include_actor=True),
             }
         }
 

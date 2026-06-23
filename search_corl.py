@@ -7,7 +7,6 @@ import argparse
 import torch
 
 from utils.get_args import get_args
-from utils.misc import apply_arch_config, arch_sweep_parameters
 from main import run
 
 def train():
@@ -36,9 +35,6 @@ def train():
         args.control_scaler = config.control_scaler
     if "policy_updates_per_cmg_update" in config:
         args.policy_updates_per_cmg_update = config.policy_updates_per_cmg_update
-
-    # Override CMG / actor architecture (width, depth, activation)
-    apply_arch_config(args, config)
 
     # Setup for the trial run
     unique_id = str(uuid.uuid4())[:4]
@@ -125,8 +121,6 @@ if __name__ == "__main__":
                     "min": 0.0,
                     "max": 1.0
                 },
-                # CMG + actor architecture (width, depth, activation)
-                **arch_sweep_parameters(include_cmg=True, include_actor=True),
             }
         }
 

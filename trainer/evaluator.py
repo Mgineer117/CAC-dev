@@ -114,21 +114,41 @@ class Evaluator:
             )
         )
 
-    def _compute_mahal_cost(self, x_np: np.ndarray, e_np: np.ndarray) -> float:
-        """Mahalanobis cost C = e^T M(x) e using the policy CMG."""
+    def _compute_empirical_metric_bounds(self, num_samples: int = 2000):
+        """Empirical min/max eigenvalues of M(x) = W(x)^{-1} over sampled buffer states.
+
+        This gives a practical (tighter) condition number than the design bounds
+        w_ub/w_lb, because the learned metric typically never reaches the extremes
+        of those bounds.  The estimate is a lower bound on the true max eigenvalue
+        (finite samples miss corners of X), but is far more informative than the
+        design bound in practice.
+
+        Returns (empirical_min_eig, empirical_max_eig, empirical_cond), or
+        (None, None, None) if the policy has no CMG.
+        """
+        if not (hasattr(self.policy, "CMG") and hasattr(self.policy, "_bound_W")):
+            return None, None, None
+
+        data_x = self.policy.data["x"]
+        n = min(num_samples, len(data_x))
+        idx = np.random.choice(len(data_x), size=n, replace=False)
+
         with torch.no_grad():
-            x_t = self.policy.to_tensor(x_np).unsqueeze(0)
-            raw_W, _ = self.policy.CMG(x_t)
+            x_batch = self.policy.to_tensor(data_x[idx])
+            raw_W, _ = self.policy.CMG(x_batch)
             W = self.policy._bound_W(raw_W)
             I = torch.eye(
                 self.policy.x_dim,
                 device=self.policy.device,
                 dtype=self.policy._dtype,
             )
-            M = torch.linalg.solve(W, I.unsqueeze(0))[0]
-            e_t = torch.from_numpy(e_np).to(self.policy._dtype).to(self.policy.device)
-            C = (e_t @ M @ e_t).item()
-        return max(C, 1e-30)
+            M = torch.linalg.solve(W, I.unsqueeze(0).expand(n, -1, -1))
+            eigs = torch.linalg.eigvalsh(M).cpu().numpy()  # (n, x_dim), ascending
+
+        empirical_min_eig = float(eigs[:, 0].min())
+        empirical_max_eig = float(eigs[:, -1].max())
+        empirical_cond = empirical_max_eig / max(empirical_min_eig, 1e-12)
+        return empirical_min_eig, empirical_max_eig, empirical_cond
 
     def evaluate(self):
         """
@@ -151,12 +171,17 @@ class Evaluator:
             if hasattr(self, "policy")
             else ""
         )
-        is_carl_m = policy_name == "carl_m"
+
+        # Practical eigenvalue bounds — computed once per evaluate() call over
+        # buffer states.  Tighter than the design bounds w_ub/w_lb but not
+        # certified (finite sample); treated as an empirical lower/upper bound.
+        emp_min_eig, emp_max_eig, emp_cond = self._compute_empirical_metric_bounds()
+        # Make empirical cond available to env.render() without an extra CMG call.
+        self.eval_env.emp_cond = emp_cond
 
         # find mean and CI of data with tqdm that disappears afterward
         for i in tqdm(range(self.eval_num), desc="Evaluating", leave=False):
             track_traj, ref_traj, error_traj, ep_buffer = [], [], [], []
-            all_ep_mahal_trajs = []  # only populated for CARL_M
             for j in range(self.eval_episodes):
                 # Env initialization
                 options = None if j == 0 else {"replace_x_0": True, "eval_mode": True}
@@ -165,15 +190,6 @@ class Evaluator:
                 # Episode variables
                 ep_ctrl_effort, ep_inf_time = 0, 0
                 ep_track_traj, ep_error_traj = [], []
-                ep_mahal_costs = []
-
-                # C_0 = e_0^T M(x_0) e_0 for the CARL_M accelerated bound
-                if is_carl_m:
-                    x0 = infos["x"]
-                    e0 = self.eval_env.wrap_angles(x0 - self.eval_env.xref[0])
-                    C_0 = self._compute_mahal_cost(x0, e0)
-                else:
-                    C_0 = 1.0
 
                 # Episode rollout
                 for t in range(1, self.eval_env.episode_len + 1):
@@ -203,21 +219,13 @@ class Evaluator:
                     if j == 0:
                         ref_traj.append(self.eval_env.xref[t, :dimension])
 
-                    # Per-step Mahalanobis cost for CARL_M accelerated bound
-                    if is_carl_m:
-                        x_curr = infos["x"]
-                        e_curr = self.eval_env.wrap_angles(x_curr - self.eval_env.xref[t])
-                        ep_mahal_costs.append(
-                            self._compute_mahal_cost(x_curr, e_curr) / C_0
-                        )
-
                     # === Termination logic === #
                     if done:
                         auc = np.trapezoid(ep_error_traj, dx=self.eval_env.dt)
 
                         ep_buffer.append(
                             {
-                                "avg_ctrl_effort": ep_ctrl_effort / t,
+                                "u_norm": ep_ctrl_effort / t,
                                 "avg_inf_time":    ep_inf_time / t,
                                 "mauc":            auc * (self.eval_env.episode_len / t),
                                 # ‖e(0)‖₂ — used for the contraction-flag bound
@@ -228,13 +236,11 @@ class Evaluator:
                         )
                         track_traj.append(ep_track_traj)
                         error_traj.append(ep_error_traj)
-                        if is_carl_m:
-                            all_ep_mahal_trajs.append(ep_mahal_costs)
 
                         break
 
             # === ref traj level logging === #
-            ctr_list  = [ep["avg_ctrl_effort"] for ep in ep_buffer]
+            ctr_list  = [ep["u_norm"] for ep in ep_buffer]
             mauc_list = [ep["mauc"]            for ep in ep_buffer]
             inf_list  = [ep["avg_inf_time"]    for ep in ep_buffer]
             init_cost_list = [ep["init_cost"]  for ep in ep_buffer]
@@ -246,24 +252,15 @@ class Evaluator:
 
             C, lbd = self.compute_contraction_rate(error_traj)
 
-            # Average Mahalanobis cost trajectory across episodes for CARL_M bound
-            if is_carl_m and all_ep_mahal_trajs:
-                min_len = min(len(t) for t in all_ep_mahal_trajs)
-                avg_mahal = np.mean(
-                    [t[:min_len] for t in all_ep_mahal_trajs], axis=0
-                )
-            else:
-                avg_mahal = None
-
             if i == 0:
                 fig = self.plot_trajectories(
                     track_traj, error_traj, dimension, C, lbd,
-                    mahal_cost_ratio_traj=avg_mahal,
+                    emp_cond=emp_cond,
                 )
 
             ep_buffers.append(
                 {
-                    "avg_ctrl_effort": ctrl_mean,
+                    "u_norm": ctrl_mean,
                     "mauc":            mauc_mean,
                     "avg_inf_time":    inf_mean,
                     "overshoot":       C,
@@ -273,7 +270,7 @@ class Evaluator:
             )
 
         # === eval num level logging === #
-        ctr_list       = [ep["avg_ctrl_effort"]  for ep in ep_buffers]
+        ctr_list       = [ep["u_norm"]  for ep in ep_buffers]
         mauc_list      = [ep["mauc"]              for ep in ep_buffers]
         inf_list       = [ep["avg_inf_time"]      for ep in ep_buffers]
         overshoot_list = [ep["overshoot"]         for ep in ep_buffers]
@@ -287,29 +284,44 @@ class Evaluator:
         lbd_mean, _         = self.mean_confidence_interval(lbd_list)
         init_cost_total     = float(np.mean(init_cost_list))
 
-        # --- Contraction flag ---------------------------------------------------
-        # Flag = 1 when the empirical overshoot C exceeds the theoretical bound:
-        #   C3M    :  √(w_ub / w_lb) · ‖e(0)‖
-        #   RL     :  (1 / (1 − γ)) · √(w_ub / w_lb) · ‖e(0)‖
+        # --- Contraction flags --------------------------------------------------
         gamma      = getattr(self.policy, "gamma", 1.0)
         w_ub       = float(getattr(self.policy, "w_ub", 1.0))
         w_lb       = float(getattr(self.policy, "w_lb", 1.0))
         sqrt_cond  = np.sqrt(w_ub / (w_lb + 1e-12))
+
         if policy_name == "c3m":
-            theo_bound = sqrt_cond * init_cost_total
+            scale = 1.0
         else:
-            theo_bound = (1.0 / max(1.0 - gamma, 1e-8)) * sqrt_cond * init_cost_total
+            scale = 1.0 / max(1.0 - gamma, 1e-8)
+
+        # Theoretical bound (design bounds w_ub / w_lb — conservative)
+        theo_bound = scale * sqrt_cond * init_cost_total
         contraction_flag = float(overshoot_mean > theo_bound)
 
+        # Practical bound (empirical eigenvalues over buffer — tighter but not
+        # certified; finite samples may miss extremes of X)
+        if emp_cond is not None:
+            sqrt_emp_cond = np.sqrt(emp_cond)
+            practical_bound = scale * sqrt_emp_cond * init_cost_total
+            practical_contraction_flag = float(overshoot_mean > practical_bound)
+        else:
+            practical_contraction_flag = float("nan")
+
         eval_dict = {
-            "eval/auc":     mauc_mean,
-            "eval/u_norm":  ctrl_mean,
-            "eval/lambda":  lbd_mean,
-            "eval/overshoot": overshoot_mean,
-            "eval/latency_ms":        inf_mean_total * 1e3,
-            "eval/performance_score": lbd_mean / (overshoot_mean + 1e-8),
-            "eval/contraction_flag":  contraction_flag,
+            "eval/auc":                       mauc_mean,
+            "eval/u_norm":                    ctrl_mean,
+            "eval/lambda":                    lbd_mean,
+            "eval/overshoot":                 overshoot_mean,
+            "eval/latency_ms":                inf_mean_total * 1e3,
+            "eval/performance_score":         lbd_mean / (overshoot_mean + 1e-8),
+            "eval/contraction_flag":          contraction_flag,
+            "eval/practical_contraction_flag": practical_contraction_flag,
         }
+        if emp_min_eig is not None:
+            eval_dict["eval/empirical_min_eig"] = emp_min_eig
+            eval_dict["eval/empirical_max_eig"] = emp_max_eig
+            eval_dict["eval/empirical_cond"]    = emp_cond
 
         supp_dict = {"eval/path_tracking_result": fig}
         if self.rendering and len(video_frames) > 0:
@@ -394,7 +406,7 @@ class Evaluator:
         dimension: int,
         C: float,
         lbd: float,
-        mahal_cost_ratio_traj: np.ndarray | None = None,
+        emp_cond: float | None = None,
     ):
         """Plot path tracking results and normalised tracking error.
 
@@ -517,20 +529,48 @@ class Evaluator:
             label=bound_label,
         )
 
-        # Accelerated IES bound for CARL_M (Theorem: Accelerated IES).
-        # C(s_k) ≤ β(s_0) C(s_0) exp(−2 λ̄(0,k) k Δt), where λ̄ is the
-        # running average of Λ(s_{k'}).  Bounding ‖e‖²/‖e_0‖² via metric
-        # eigenvalues gives:  bound(k) = (w_ub/w_lb) · C_k/C_0
-        # where C_k/C_0 = mahal_cost_ratio_traj[k] is pre-computed per step.
-        if policy_name == "carl_m" and mahal_cost_ratio_traj is not None and len(mahal_cost_ratio_traj) > 0:
-            accel_bound = cond * np.asarray(mahal_cost_ratio_traj)
+        # Accelerated IES bound in Euclidean space (no CMG calls during rollout).
+        # Theorem gives C(s_k) ≤ κ C(s_0) exp(−2λ̄(0,k)kΔt).  Converting to
+        # Euclidean via metric eigenvalue bounds and estimating λ̄ from the
+        # observed error ratio yields:  bound(k) = κ · ⟨‖e_k‖²/‖e_0‖²⟩
+        # where κ = w_ub/w_lb (design) or emp_cond (empirical).
+        if error_trajectories and cond > 1.0:
+            min_len = min(len(t) for t in error_trajectories)
+            mean_err = np.mean(
+                [np.array(t[:min_len]) for t in error_trajectories], axis=0
+            )
             ax2.plot(
-                timesteps[: len(accel_bound)],
-                accel_bound,
+                timesteps[:min_len],
+                cond * mean_err,
                 linestyle="--",
                 color="navy",
                 linewidth=1.8,
-                label=rf"Theory (accel.): $(w_{{ub}}/w_{{lb}})\,C_k/C_0$",
+                label=rf"Theory (accel.): $\kappa\langle e^2\rangle/e_0^2$ ($\kappa={cond:.1f}$)",
+            )
+            if emp_cond is not None:
+                ax2.plot(
+                    timesteps[:min_len],
+                    emp_cond * mean_err,
+                    linestyle=(0, (3, 1, 1, 1)),
+                    color="mediumseagreen",
+                    linewidth=1.8,
+                    label=rf"Practical (accel.): $\hat\kappa\langle e^2\rangle/e_0^2$ ($\hat\kappa={emp_cond:.1f}$)",
+                )
+
+        # Practical standard bound — replaces design sqrt(κ) with empirical sqrt(κ̂)
+        if emp_cond is not None:
+            sqrt_emp_cond = np.sqrt(emp_cond)
+            if policy_name == "c3m":
+                prac_factor = sqrt_emp_cond
+            else:
+                prac_factor = (1.0 / max(1.0 - gamma, 1e-8)) * sqrt_emp_cond
+            ax2.plot(
+                timesteps,
+                prac_factor * np.exp(-lbd_design * timesteps),
+                linestyle=":",
+                color="darkorange",
+                linewidth=1.8,
+                label=rf"Practical (std): $\sqrt{{\hat\kappa}}\,e^{{-\lambda t}}$ ($\hat\kappa={emp_cond:.1f}$)",
             )
 
         ax2.set_xlabel("Time (s)", fontsize=16)

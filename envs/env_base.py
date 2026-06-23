@@ -128,7 +128,7 @@ class BaseEnv(gym.Env):
         self.init_tracking_error = np.linalg.norm(self.x_t - self.xref[0], ord=2) ** 2
 
         self.traj_x, self.traj_y, self.traj_z = [], [], []
-        self.err_history, self.bound_history, self.rt_bound_history = [], [], []
+        self.err_history, self.bound_history, self.emp_bound_history = [], [], []
 
         return state, {"x": self.x_t, "tracking_error": self.init_tracking_error}
 
@@ -382,69 +382,52 @@ class BaseEnv(gym.Env):
                 self.ax = self.fig.add_subplot(121)
             self.ax_err = self.fig.add_subplot(122)
             self.traj_x, self.traj_y, self.traj_z = [], [], []
-            self.err_history, self.bound_history, self.rt_bound_history = [], [], []
+            self.err_history, self.bound_history, self.emp_bound_history = [], [], []
 
         self.ax.clear()
         self.ax_err.clear()
 
-        # Calculate Contraction Bounds
+        # Calculate Contraction Bounds using design parameters and empirical eigenvalues.
+        # Theoretical:  sqrt(w_ub/w_lb)            * ||e_0|| * exp(-λ k Δt)  (C3M / LQR)
+        #               sqrt(w_ub/w_lb) / (1-γ)    * ||e_0|| * exp(-λ k Δt)  (CARL / CARL_M)
+        # Empirical:    same but with sqrt(emp_cond) from evaluator (passed as self.emp_cond).
         bound = None
+        bound_arr = None
+        emp_bound = None
+        emp_bound_arr = None
         policy_name = self.policy.__class__.__name__.lower() if hasattr(self, "policy") else ""
-        if policy_name in ["c3m", "lqr", "carl", "trpo", "cpo", "sd_lqr", "ppo", "cac", "algorithm"]:
-            lbd = getattr(self, "lbd", getattr(self.policy, "lbd", 0.0))
-            gamma = getattr(self, "gamma", getattr(self.policy, "gamma", 1.0))
-            
-            cond = 1.0
-            if policy_name in ["c3m", "lqr", "sd_lqr"]:
-                if hasattr(self.policy, "W"):
-                    W = self.policy.W.detach().cpu().numpy()
-                    if W.ndim == 3: W = W[0]
-                    M = W.T @ W
-                    eigvals = np.linalg.eigvals(M)
-                    if np.min(np.real(eigvals)) > 0:
-                        cond = np.sqrt(np.max(np.real(eigvals)) / np.min(np.real(eigvals)))
-                elif hasattr(self.policy, "CMG") and hasattr(self, "x_0"):
-                    x0 = torch.tensor(self.x_0, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
-                    W = self.policy.CMG(x0)[0].detach().squeeze(0).cpu().numpy()
-                    M = W.T @ W
-                    eigvals = np.linalg.eigvals(M)
-                    if np.min(np.real(eigvals)) > 0:
-                        cond = np.sqrt(np.max(np.real(eigvals)) / np.min(np.real(eigvals)))
-            elif policy_name in ["carl", "trpo", "cpo", "ppo", "cac"]:
-                if hasattr(self.policy, "CMG") and hasattr(self, "x_0"):
-                    x0 = torch.tensor(self.x_0, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
-                    W = self.policy.CMG(x0)[0].detach().squeeze(0).cpu().numpy()
-                    M = W.T @ W
-                    eigvals = np.linalg.eigvals(M)
-                    if np.min(np.real(eigvals)) > 0:
-                        cond = np.sqrt(np.max(np.real(eigvals)) / np.min(np.real(eigvals)))
-            
-            if hasattr(self, "x_0") and hasattr(self, "xref"):
-                e0 = self.x_0 - self.xref[0]
-                e0 = self.wrap_angles(e0)
-                C_s0 = np.linalg.norm(e0)
-            else:
-                C_s0 = 1.0
+        if policy_name in ["c3m", "lqr", "carl", "carl_m", "corl", "trpo", "cpo", "sd_lqr", "ppo", "cac", "algorithm"]:
+            lbd        = float(getattr(self.policy, "lbd", 0.0) or 0.0)
+            gamma      = float(getattr(self.policy, "gamma", 1.0))
+            w_ub       = float(getattr(self.policy, "w_ub", 1.0) or 1.0)
+            w_lb       = float(getattr(self.policy, "w_lb", 1.0) or 1.0)
+            sqrt_cond  = np.sqrt(w_ub / max(w_lb, 1e-12))
 
-            if policy_name in ["c3m"]:
-                bound = cond * C_s0 * np.exp(-lbd * self.time_steps * self.dt)
-                bound_arr = cond * C_s0 * np.exp(-lbd * np.arange(self.episode_len) * self.dt)
-            elif policy_name in ["carl", "trpo", "cpo", "ppo", "cac"]:
-                factor = cond / (1 - gamma) if gamma < 1.0 else cond
-                bound = factor * C_s0 * np.exp(-lbd * self.time_steps * self.dt)
-                bound_arr = factor * C_s0 * np.exp(-lbd * np.arange(self.episode_len) * self.dt)
-            elif policy_name in ["lqr", "sd_lqr"]:
-                bound = cond * C_s0 * np.exp(-lbd * self.time_steps * self.dt)
-                bound_arr = cond * C_s0 * np.exp(-lbd * np.arange(self.episode_len) * self.dt)
-                if not hasattr(self, "empirical_alpha"):
-                    self.empirical_alpha = 1.0
-                
-                if hasattr(self, "xref"):
-                    current_error = np.linalg.norm(self.wrap_angles(self.x_t - self.xref[self.time_steps]))
-                    current_bound = bound if bound > 1e-9 else 1e-9
-                    alpha = current_error / current_bound
-                    if alpha > self.empirical_alpha:
-                        self.empirical_alpha = alpha
+            if hasattr(self, "x_0") and hasattr(self, "xref"):
+                e0 = self.wrap_angles(self.x_0 - self.xref[0])
+                init_cost = np.linalg.norm(e0)
+            else:
+                init_cost = 1.0
+
+            if policy_name in ["c3m", "lqr", "sd_lqr"]:
+                theo_factor = sqrt_cond
+            else:
+                theo_factor = sqrt_cond / max(1.0 - gamma, 1e-8)
+
+            k_arr     = np.arange(self.episode_len)
+            bound_arr = theo_factor * init_cost * np.exp(-lbd * k_arr * self.dt)
+            bound     = bound_arr[min(self.time_steps, self.episode_len - 1)]
+
+            # Empirical bound (emp_cond is set by Evaluator before the rollout)
+            emp_cond_val = getattr(self, "emp_cond", None)
+            if emp_cond_val is not None:
+                sqrt_emp_cond = np.sqrt(emp_cond_val)
+                if policy_name in ["c3m", "lqr", "sd_lqr"]:
+                    emp_factor = sqrt_emp_cond
+                else:
+                    emp_factor = sqrt_emp_cond / max(1.0 - gamma, 1e-8)
+                emp_bound_arr = emp_factor * init_cost * np.exp(-lbd * k_arr * self.dt)
+                emp_bound     = emp_bound_arr[min(self.time_steps, self.episode_len - 1)]
         
         # Track histories for error plot
         if hasattr(self, "xref"):
@@ -452,8 +435,8 @@ class BaseEnv(gym.Env):
             self.err_history.append(np.linalg.norm(e_t))
         if bound is not None:
             self.bound_history.append(bound)
-            if policy_name in ["lqr", "sd_lqr"] and hasattr(self, "empirical_alpha"):
-                self.rt_bound_history.append(self.empirical_alpha * bound)
+        if emp_bound is not None:
+            self.emp_bound_history.append(emp_bound)
 
         # Extract position and yaw
         pos = self.x_t[:self.pos_dimension]
@@ -489,9 +472,8 @@ class BaseEnv(gym.Env):
                 self.ax.quiver(pos[0], pos[1], pos[2], action_vec[0], action_vec[1], action_vec[2], color='m', length=1.0, normalize=True, label='Action')
                 
             if hasattr(self, "xref"):
-                margin = max(0.5, bound * 1.1 if bound is not None else 0.0)
-                if policy_name in ["lqr", "sd_lqr"] and hasattr(self, "empirical_alpha") and bound is not None:
-                    margin = max(margin, self.empirical_alpha * bound * 1.1)
+                ref_bound = emp_bound if emp_bound is not None else bound
+                margin = max(0.5, ref_bound * 1.1 if ref_bound is not None else 0.0)
                 self.ax.set_xlim(np.min(self.xref[:, 0]) - margin, np.max(self.xref[:, 0]) + margin)
                 self.ax.set_ylim(np.min(self.xref[:, 1]) - margin, np.max(self.xref[:, 1]) + margin)
                 self.ax.set_zlim(np.min(self.xref[:, 2]) - margin, np.max(self.xref[:, 2]) + margin)
@@ -507,33 +489,30 @@ class BaseEnv(gym.Env):
                         z_sphere = ref_pos[2] + b_t * np.cos(v_grid)
                         self.ax.plot_wireframe(x_sphere, y_sphere, z_sphere, color="orange", alpha=0.05)
                         
-                    self.ax.plot([], [], [], color="orange", alpha=0.5, label='Theoretical Bound')
-                    
+                    self.ax.plot([], [], [], color="orange", alpha=0.5, label='Theory Bound')
+
                     # Highlight current theoretical bound
                     cur_ref_pos = self.xref[self.time_steps, :3]
                     cur_b_t = bound_arr[self.time_steps]
                     cur_x = cur_ref_pos[0] + cur_b_t * np.cos(u_grid) * np.sin(v_grid)
                     cur_y = cur_ref_pos[1] + cur_b_t * np.sin(u_grid) * np.sin(v_grid)
                     cur_z = cur_ref_pos[2] + cur_b_t * np.cos(v_grid)
-                    self.ax.plot_wireframe(cur_x, cur_y, cur_z, color="orange", alpha=0.5, label='Current Theo Bound')
-                    
-                    if policy_name in ["lqr", "sd_lqr"] and hasattr(self, "empirical_alpha"):
-                        rt_bound_arr = self.empirical_alpha * bound_arr
+                    self.ax.plot_wireframe(cur_x, cur_y, cur_z, color="orange", alpha=0.5, label='Current Theory Bound')
+
+                    if emp_bound_arr is not None:
                         for t in range(0, self.episode_len, step):
                             ref_pos = self.xref[t, :3]
-                            rt_b_t = rt_bound_arr[t]
-                            x_rt = ref_pos[0] + rt_b_t * np.cos(u_grid) * np.sin(v_grid)
-                            y_rt = ref_pos[1] + rt_b_t * np.sin(u_grid) * np.sin(v_grid)
-                            z_rt = ref_pos[2] + rt_b_t * np.cos(v_grid)
-                            self.ax.plot_wireframe(x_rt, y_rt, z_rt, color="red", alpha=0.05)
-                        self.ax.plot([], [], [], color="red", alpha=0.5, label='Real-time Bound')
-                        
-                        # Highlight current real-time bound
-                        cur_rt_b_t = rt_bound_arr[self.time_steps]
-                        cur_x_rt = cur_ref_pos[0] + cur_rt_b_t * np.cos(u_grid) * np.sin(v_grid)
-                        cur_y_rt = cur_ref_pos[1] + cur_rt_b_t * np.sin(u_grid) * np.sin(v_grid)
-                        cur_z_rt = cur_ref_pos[2] + cur_rt_b_t * np.cos(v_grid)
-                        self.ax.plot_wireframe(cur_x_rt, cur_y_rt, cur_z_rt, color="red", alpha=0.5, label='Current RT Bound')
+                            eb_t = emp_bound_arr[t]
+                            x_eb = ref_pos[0] + eb_t * np.cos(u_grid) * np.sin(v_grid)
+                            y_eb = ref_pos[1] + eb_t * np.sin(u_grid) * np.sin(v_grid)
+                            z_eb = ref_pos[2] + eb_t * np.cos(v_grid)
+                            self.ax.plot_wireframe(x_eb, y_eb, z_eb, color="mediumseagreen", alpha=0.05)
+                        self.ax.plot([], [], [], color="mediumseagreen", alpha=0.5, label='Empirical Bound')
+                        cur_eb_t = emp_bound_arr[self.time_steps]
+                        cur_x_eb = cur_ref_pos[0] + cur_eb_t * np.cos(u_grid) * np.sin(v_grid)
+                        cur_y_eb = cur_ref_pos[1] + cur_eb_t * np.sin(u_grid) * np.sin(v_grid)
+                        cur_z_eb = cur_ref_pos[2] + cur_eb_t * np.cos(v_grid)
+                        self.ax.plot_wireframe(cur_x_eb, cur_y_eb, cur_z_eb, color="mediumseagreen", alpha=0.5, label='Current Emp Bound')
             else:
                 xmin, xmax = self.X_MIN.flatten(), self.X_MAX.flatten()
                 self.ax.set_xlim(xmin[0], xmax[0])
@@ -569,47 +548,34 @@ class BaseEnv(gym.Env):
                 self.ax.arrow(p_x, p_y, ax_dx, ax_dy, color='m', head_width=0.2, label='Action')
                 
             if hasattr(self, "xref"):
-                margin = max(0.5, bound * 1.1 if bound is not None else 0.0)
-                if policy_name in ["lqr", "sd_lqr"] and hasattr(self, "empirical_alpha") and bound is not None:
-                    margin = max(margin, self.empirical_alpha * bound * 1.1)
+                ref_bound = emp_bound if emp_bound is not None else bound
+                margin = max(0.5, ref_bound * 1.1 if ref_bound is not None else 0.0)
                 self.ax.set_xlim(np.min(self.xref[:, 0]) - margin, np.max(self.xref[:, 0]) + margin)
                 if self.pos_dimension > 1:
                     self.ax.set_ylim(np.min(self.xref[:, 1]) - margin, np.max(self.xref[:, 1]) + margin)
 
                 if bound is not None:
                     step = max(1, self.episode_len // 50)
+                    cur_ref_pos = self.xref[self.time_steps, :2]
                     for t in range(0, self.episode_len, step):
                         ref_pos = self.xref[t, :2]
                         b_t = bound_arr[t]
-                        circle = plt.Circle((ref_pos[0], ref_pos[1] if self.pos_dimension > 1 else 0.0), b_t, color='orange', fill=True, alpha=0.03, linewidth=0)
-                        self.ax.add_patch(circle)
-                        circle_edge = plt.Circle((ref_pos[0], ref_pos[1] if self.pos_dimension > 1 else 0.0), b_t, color='orange', fill=False, alpha=0.2, linestyle=':')
-                        self.ax.add_patch(circle_edge)
-                        
-                    self.ax.plot([], [], color='orange', alpha=0.5, label='Theoretical Bound')
-                    
-                    # Highlight current theoretical bound
-                    cur_ref_pos = self.xref[self.time_steps, :2]
-                    cur_b_t = bound_arr[self.time_steps]
-                    cur_circle = plt.Circle((cur_ref_pos[0], cur_ref_pos[1] if self.pos_dimension > 1 else 0.0), cur_b_t, color='orange', fill=False, linewidth=2.0, label='Current Theo Bound')
-                    self.ax.add_patch(cur_circle)
-                    
-                    if policy_name in ["lqr", "sd_lqr"] and hasattr(self, "empirical_alpha"):
-                        rt_bound_arr = self.empirical_alpha * bound_arr
+                        cy = ref_pos[1] if self.pos_dimension > 1 else 0.0
+                        self.ax.add_patch(plt.Circle((ref_pos[0], cy), b_t, color='orange', fill=True, alpha=0.03, linewidth=0))
+                        self.ax.add_patch(plt.Circle((ref_pos[0], cy), b_t, color='orange', fill=False, alpha=0.2, linestyle=':'))
+                    self.ax.plot([], [], color='orange', alpha=0.5, label='Theory Bound')
+                    cur_cy = cur_ref_pos[1] if self.pos_dimension > 1 else 0.0
+                    self.ax.add_patch(plt.Circle((cur_ref_pos[0], cur_cy), bound_arr[self.time_steps], color='orange', fill=False, linewidth=2.0, label='Current Theory Bound'))
+
+                    if emp_bound_arr is not None:
                         for t in range(0, self.episode_len, step):
                             ref_pos = self.xref[t, :2]
-                            rt_b_t = rt_bound_arr[t]
-                            rt_circle = plt.Circle((ref_pos[0], ref_pos[1] if self.pos_dimension > 1 else 0.0), rt_b_t, color='red', fill=True, alpha=0.03, linewidth=0)
-                            self.ax.add_patch(rt_circle)
-                            rt_circle_edge = plt.Circle((ref_pos[0], ref_pos[1] if self.pos_dimension > 1 else 0.0), rt_b_t, color='red', fill=False, alpha=0.2, linestyle=':')
-                            self.ax.add_patch(rt_circle_edge)
-                            
-                        self.ax.plot([], [], color='red', alpha=0.5, label='Real-time Bound')
-                        
-                        # Highlight current real-time bound
-                        cur_rt_b_t = rt_bound_arr[self.time_steps]
-                        cur_rt_circle = plt.Circle((cur_ref_pos[0], cur_ref_pos[1] if self.pos_dimension > 1 else 0.0), cur_rt_b_t, color='red', fill=False, linewidth=2.0, linestyle=':', label='Current RT Bound')
-                        self.ax.add_patch(cur_rt_circle)
+                            eb_t = emp_bound_arr[t]
+                            cy = ref_pos[1] if self.pos_dimension > 1 else 0.0
+                            self.ax.add_patch(plt.Circle((ref_pos[0], cy), eb_t, color='mediumseagreen', fill=True, alpha=0.03, linewidth=0))
+                            self.ax.add_patch(plt.Circle((ref_pos[0], cy), eb_t, color='mediumseagreen', fill=False, alpha=0.2, linestyle=':'))
+                        self.ax.plot([], [], color='mediumseagreen', alpha=0.5, label='Empirical Bound')
+                        self.ax.add_patch(plt.Circle((cur_ref_pos[0], cur_cy), emp_bound_arr[self.time_steps], color='mediumseagreen', fill=False, linewidth=2.0, label='Current Emp Bound'))
             else:
                 xmin, xmax = self.X_MIN.flatten(), self.X_MAX.flatten()
                 self.ax.set_xlim(xmin[0], xmax[0])
@@ -618,26 +584,22 @@ class BaseEnv(gym.Env):
                 
         # Add timestep to title
         if hasattr(self, "time_steps"):
-            title = f"Time Step: {self.time_steps}"
-            if policy_name in ["lqr", "sd_lqr"] and hasattr(self, "empirical_alpha"):
-                title += f" | alpha: {self.empirical_alpha:.2f}"
-            self.ax.set_title(title)
-            
+            self.ax.set_title(f"Time Step: {self.time_steps}")
+
         # Draw Legend for Trajectory Plot
-        # Ensure we only have unique labels
         handles, labels = self.ax.get_legend_handles_labels()
         by_label = dict(zip(labels, handles))
         self.ax.legend(by_label.values(), by_label.keys(), loc='upper right')
-        
+
         # Draw Error Subplot
         if hasattr(self, "time_steps") and len(self.err_history) > 0:
             times = np.arange(len(self.err_history)) * self.dt
             self.ax_err.plot(times, self.err_history, 'b-', label='Tracking Error')
             if len(self.bound_history) == len(self.err_history):
-                self.ax_err.plot(times, self.bound_history, 'orange', linestyle='--', label='Theoretical Bound')
-            if len(self.rt_bound_history) == len(self.err_history):
-                self.ax_err.plot(times, self.rt_bound_history, 'red', linestyle=':', label='Real-time Bound')
-                
+                self.ax_err.plot(times, self.bound_history, color='orange', linestyle='--', label='Theory Bound')
+            if len(self.emp_bound_history) == len(self.err_history):
+                self.ax_err.plot(times, self.emp_bound_history, color='mediumseagreen', linestyle=':', label='Empirical Bound')
+
             self.ax_err.set_xlabel("Time (s)")
             self.ax_err.set_ylabel("Error Norm")
             self.ax_err.set_title("Tracking Error vs Bounds")

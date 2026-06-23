@@ -168,17 +168,20 @@ class CARL(Base):
         buffer_size, batch_size = self.data["x"].shape[0], 1024
         indices = np.random.choice(buffer_size, size=batch_size, replace=False)
         for key in self.data.keys():
-            # Sample a batch of 1024
             batch[key] = self.data[key][indices]
 
         # === PREPARE TENSORS === #
-        x = self.to_tensor(batch["x"]).requires_grad_().repeat(4, 1)
-        xref = self.to_tensor(batch["xref"]).repeat(4, 1)
-        uref = self.to_tensor(batch["uref"]).repeat(4, 1)
+        x = self.to_tensor(batch["x"]).requires_grad_()
+        xref = self.to_tensor(batch["xref"])
+        uref = self.to_tensor(batch["uref"])
 
-        # since online we do not do below
+        # Use deterministic (mean) action to evaluate contraction loss — avoids
+        # stochastic noise in K and keeps the graph clean without repeat tricks.
         state = torch.concatenate([x, xref, uref], dim=1)
+        prev_mode = self.actor.mode
+        self.actor.mode = "deterministic"
         u, _ = self.actor(state)
+        self.actor.mode = prev_mode
         K = self.Jacobian(u, x)  # n, f_dim, x_dim
 
         # detach actor gradients

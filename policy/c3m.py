@@ -180,7 +180,6 @@ class C3M(SDLQRPretrainMixin, Base):
         buffer_size, batch_size = self.data["x"].shape[0], 1024
         indices = np.random.choice(buffer_size, size=batch_size, replace=False)
         for key in self.data.keys():
-            # Sample a batch of 1024
             batch[key] = self.data[key][indices]
 
         # === PREPARE TENSORS === #

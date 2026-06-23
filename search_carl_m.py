@@ -100,7 +100,7 @@ if __name__ == "__main__":
                     "distribution": "log_uniform_values"
                 },
                 "policy_updates_per_cmg_update": {
-                    "values": [1, 5, 10, 20, 50, 100]
+                    "values": [1, 5, 10, 50]
                 },
                 "c3m_pretrain_cmg": {
                     "values": [True, False]

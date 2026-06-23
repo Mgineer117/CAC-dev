@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Number of agents to run
-AGENTS=8
+AGENTS=10
 
 echo "=========================================================="
 echo "   Launching CARL_M Hyperparameter Sweep in Background    "

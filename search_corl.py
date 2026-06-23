@@ -65,7 +65,7 @@ def train():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WandB Sweep Launcher for CORL")
     parser.add_argument("--sweep_id", type=str, default=None, help="WandB sweep ID to join")
-    parser.add_argument("--count", type=int, default=100, help="Number of trials to run")
+    parser.add_argument("--count", type=int, default=4, help="Number of trials to run")
     parser.add_argument("--project", type=str, default="CORL-SWEEP", help="WandB project name")
     
     # Parse only known search-specific args

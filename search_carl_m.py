@@ -61,7 +61,7 @@ import argparse
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="WandB Sweep Launcher for CARL_M")
     parser.add_argument("--sweep_id", type=str, default=None, help="WandB sweep ID to join")
-    parser.add_argument("--count", type=int, default=100, help="Number of trials to run")
+    parser.add_argument("--count", type=int, default=4, help="Number of trials to run")
     parser.add_argument("--project", type=str, default="CARL-M-SWEEP", help="WandB project name")
 
     search_args, remaining_args = parser.parse_known_args()
@@ -97,7 +97,7 @@ if __name__ == "__main__":
                     "distribution": "log_uniform_values"
                 },
                 "policy_updates_per_cmg_update": {
-                    "values": [1, 5, 10, 50]
+                    "values": [1, 5, 10, 30]
                 },
                 "c3m_pretrain_cmg": {
                     "values": [True, False]

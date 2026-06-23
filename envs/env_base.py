@@ -105,6 +105,10 @@ class BaseEnv(gym.Env):
         if options is None:
             # Default reset behavior
             self.x_t, self.xref, self.uref, self.episode_len = self.system_reset()
+            # Clip reference trajectory to X bounds (all dims).
+            # Position dims are already handled by get_transition's freeze logic;
+            # this catches non-position dims (velocities, etc.) that may drift OOB.
+            self.xref = np.clip(self.xref, self.X_MIN.flatten(), self.X_MAX.flatten())
         else:
             assert hasattr(self, "xref") and hasattr(
                 self, "uref"

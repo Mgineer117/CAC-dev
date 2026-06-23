@@ -1,14 +1,11 @@
 import os
 import time
 from abc import abstractmethod
-from collections import deque
-from copy import deepcopy
 
 import gymnasium as gym
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -107,13 +104,12 @@ class Evaluator:
 
                 # Calculate expected remaining time
                 pbar.update(self.eval_interval)
-                print("pbar updated")
                 eval_idx += 1
 
             torch.cuda.empty_cache()
 
         self.logger.print(
-            "total PPO training time: {:.2f} hours".format(
+            "total evaluation time: {:.2f} hours".format(
                 (time.time() - start_time) / 3600
             )
         )
@@ -137,8 +133,6 @@ class Evaluator:
         # find mean and CI of data with tqdm that disappears afterward
         for i in tqdm(range(self.eval_num), desc="Evaluating", leave=False):
             track_traj, ref_traj, error_traj, ep_buffer = [], [], [], []
-            obs, infos = self.eval_env.reset(seed=self.seed)
-            # find mean of data
             for j in range(self.eval_episodes):
                 # Env initialization
                 options = None if j == 0 else {"replace_x_0": True, "eval_mode": True}
@@ -211,7 +205,7 @@ class Evaluator:
 
             if i == 0:
                 fig = self.plot_trajectories(
-                    track_traj, error_traj, dimension, C, lbd, init_cost_mean
+                    track_traj, error_traj, dimension, C, lbd
                 )
 
             ep_buffers.append(
@@ -260,9 +254,10 @@ class Evaluator:
         contraction_flag = float(overshoot_mean > theo_bound)
 
         eval_dict = {
-            "eval/auc":               mauc_mean,
-            "eval/control_effort":    ctrl_mean,
-            "eval/contraction_rate":  lbd_mean,
+            "eval/auc":     mauc_mean,
+            "eval/u_norm":  ctrl_mean,
+            "eval/lambda":  lbd_mean,
+            "eval/overshoot": overshoot_mean,
             "eval/latency_ms":        inf_mean_total * 1e3,
             "eval/performance_score": lbd_mean / (overshoot_mean + 1e-8),
             "eval/contraction_flag":  contraction_flag,
@@ -336,252 +331,6 @@ class Evaluator:
 
         return best_C, best_lbd
 
-    def compute_gamma_discounted_cost(self, error_trajectories: list[list[float]], gamma: float, lbd: float):
-        N_list = []
-        c_gamma_N_list = []
-        c_gamma_inf_list = []
-        dt = self.eval_env.dt
-        
-        def _cond(W: np.ndarray) -> float:
-            """Condition number of W^T W; returns 1.0 if W is non-finite."""
-            if not np.all(np.isfinite(W)):
-                return 1.0
-            try:
-                eigs = np.real(np.linalg.eigvals(W.T @ W))
-                if np.min(eigs) > 0:
-                    return float(np.sqrt(np.max(eigs) / np.min(eigs)))
-            except np.linalg.LinAlgError:
-                pass
-            return 1.0
-
-        # Determine theoretical overshoot bound factor
-        factor = 1.0
-        policy_name = self.policy.__class__.__name__.lower() if hasattr(self, "policy") else ""
-        if policy_name == "c3m":
-            if hasattr(self.policy, "W"):
-                W = self.policy.W.detach().cpu().numpy()
-                if W.ndim == 3:
-                    W = W[0]
-                factor = _cond(W)
-            elif hasattr(self.policy, "CMG") and hasattr(self.eval_env, "x_0"):
-                import torch
-                x0 = torch.tensor(self.eval_env.x_0, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
-                W = self.policy.CMG(x0)[0].detach().squeeze(0).cpu().numpy()
-                factor = _cond(W)
-        elif policy_name in ["carl", "corl", "trpo", "cpo", "ppo", "cac"]:
-            if hasattr(self.policy, "CMG") and hasattr(self.eval_env, "x_0"):
-                import torch
-                x0 = torch.tensor(self.eval_env.x_0, dtype=torch.float32, device=self.policy.device).unsqueeze(0)
-                W = self.policy.CMG(x0)[0].detach().squeeze(0).cpu().numpy()
-                cond = _cond(W)
-                factor = cond / (1 - gamma) if gamma < 1.0 else cond
-
-        for ep_err in error_trajectories:
-            N = 0
-            for k in range(len(ep_err) - 1, -1, -1):
-                # Transient overshoot if cost goes beyond the theoretical bound
-                if ep_err[k] > factor * np.exp(-lbd * k * dt):
-                    N = k
-                    break
-            
-            # Helper to compute C_gamma for a single trajectory
-            def _calc(start, end):
-                if start > end: return 0.0
-                num = 0.0
-                den = 0.0
-                for k in range(start, end + 1):
-                    if k < len(ep_err):
-                        num += (gamma ** k) * ep_err[k]
-                        den += (gamma ** k)
-                return num / den if den > 0 else 0.0
-            
-            if N > 1:
-                # Transient overshoot detected
-                c_gamma_N_list.append(_calc(0, N - 1))
-                c_gamma_inf_list.append(_calc(N, len(ep_err) - 1))
-            else:
-                # No transient overshoot detected (nominal contraction)
-                c_gamma_N_list.append(np.nan)
-                c_gamma_inf_list.append(_calc(0, len(ep_err) - 1))
-                N = 0
-                
-            N_list.append(N)
-
-        def _safe_nanmean(arr):
-            # np.nanmean warns and returns nan on an all-nan slice; guard it.
-            arr = np.asarray(arr, dtype=float)
-            if arr.size == 0 or np.all(np.isnan(arr)):
-                return np.nan
-            return float(np.nanmean(arr))
-
-        return (
-            _safe_nanmean(N_list),
-            _safe_nanmean(c_gamma_N_list),
-            _safe_nanmean(c_gamma_inf_list),
-        )
-
-    def compute_eta_metrics(
-        self,
-        error_trajectories: list[list[float]],
-        gamma: float,
-        lbd: float,
-    ) -> dict:
-        """Back-compute the empirical metric approximation error η from rollout data.
-
-        The value-contraction lemma guarantees:
-            V_C(s_k) ≤ α(η) · V_C(s_0) · e^{-2λkΔt},  α(η) = (m̲+η)/(m̲−η).
-
-        For α = 1 (η = 0) the bound must hold if M_ξ is perfect. Any violation
-        implies α > 1, from which we back-compute:
-            η_emp = m̲ · (α_emp − 1) / (α_emp + 1).
-
-        We also check the theorem condition:
-            η < m̲ · γ(1 − e^{−2λΔt}) / (2 − γ(1 + e^{−2λΔt})).
-        """
-        dt = self.eval_env.dt
-        eps = 1e-8
-        m_lb = getattr(self.policy, "w_lb", None)
-        if m_lb is None:
-            return {}
-        m_lb = float(m_lb)
-
-        alpha_list, viol_list = [], []
-
-        for ep_err in error_trajectories:
-            T = len(ep_err)
-            if T < 2:
-                continue
-            # discounted cost-to-go V_C(s_k) = sum_{j>=k} gamma^{j-k} * error_j
-            V = np.zeros(T)
-            acc = 0.0
-            for k in range(T - 1, -1, -1):
-                acc = ep_err[k] + gamma * acc
-                V[k] = acc
-            V0 = V[0]
-            if V0 <= eps:
-                continue
-            alpha_max = 1.0
-            for k in range(1, T):
-                if V[k] <= eps:
-                    continue
-                bound = V0 * np.exp(-2.0 * lbd * k * dt)
-                if bound <= eps:
-                    continue
-                alpha_k = V[k] / bound
-                alpha_max = max(alpha_max, alpha_k)
-                viol_list.append(1.0 if alpha_k > 1.0 else 0.0)
-            alpha_list.append(alpha_max)
-
-        if not alpha_list:
-            nan = float("nan")
-            return {k: nan for k in [
-                "eval/eta_alpha", "eval/eta_emp",
-                "eval/eta_threshold", "eval/eta_theorem_ok", "eval/eta_violation_rate",
-            ]}
-
-        alpha_emp = float(np.mean(alpha_list))
-        eta_emp = m_lb * (alpha_emp - 1.0) / (alpha_emp + 1.0) if alpha_emp > 1.0 else 0.0
-
-        # η threshold from the IES theorem: m̲ · γ(1−β) / (2 − γ(1+β)), β = e^{-2λΔt}
-        beta = np.exp(-2.0 * lbd * dt)
-        denom = 2.0 - gamma * (1.0 + beta)
-        eta_thresh = m_lb * gamma * (1.0 - beta) / denom if denom > eps else float("inf")
-
-        return {
-            "eval/eta_alpha":         alpha_emp,           # minimal α s.t. lemma holds
-            "eval/eta_emp":           eta_emp,             # back-computed η
-            "eval/eta_threshold":     eta_thresh,          # theorem η upper-bound
-            "eval/eta_theorem_ok":    float(eta_emp < eta_thresh),  # 1 = theorem holds
-            "eval/eta_violation_rate": float(np.mean(viol_list)) if viol_list else 0.0,
-        }
-
-    def compute_value_contraction_metrics(
-        self,
-        error_trajectories: list[list[float]],
-        gamma: float,
-        lbd: float,
-    ):
-        """Certify the value-contraction lemma along the discounted cost-to-go.
-
-        For each state s_k along a trajectory we form the discounted cost value
-        function V_C(s_k) = sum_{j>=k} gamma^{j-k} c(s_j), with stage cost c equal
-        to the (normalized) tracking error. The lemma claims
-
-            V_C(s_k) <= exp(-2 * lbd_bar(0,k) * k * dt) * V_C(s_0).
-
-        Using the design rate lbd as a surrogate for the running-mean rate
-        lbd_bar(0,k), we report:
-          - the empirical contraction rate  lbd_emp(k) = -ln(V_C(s_k)/V_C(s_0)) / (2 k dt)
-            summarized as min / max / avg / 95th percentile,
-          - vc_rate_guaranteed_95: the 5th percentile rate (the rate met or
-            exceeded by 95% of states -- a certified rate for 95% of states),
-          - vc_violation_rate: fraction of states where the imperfect SD-LQR
-            control violates the lemma bound (V_C decays slower than guaranteed),
-          - vc_violation_magnitude: mean V_C(s_k) / bound over violating states.
-        """
-        dt = self.eval_env.dt
-        eps = 1e-8
-
-        rates = []
-        violations = []
-        magnitudes = []
-
-        for ep_err in error_trajectories:
-            T = len(ep_err)
-            if T < 2:
-                continue
-
-            # Discounted cost-to-go V_C(s_k) for each k (stage cost = tracking error).
-            V = np.zeros(T, dtype=np.float64)
-            running = 0.0
-            for k in range(T - 1, -1, -1):
-                running = ep_err[k] + gamma * running
-                V[k] = running
-
-            V0 = V[0]
-            if V0 <= eps:
-                continue
-
-            for k in range(1, T):
-                if V[k] <= eps:
-                    # cost-to-go effectively zero -> treat as fully contracted
-                    continue
-                ratio = V[k] / V0
-                t = k * dt
-                lbd_emp = -np.log(ratio) / (2.0 * t)
-                rates.append(lbd_emp)
-
-                bound = np.exp(-2.0 * lbd * t) * V0
-                is_violation = V[k] > bound
-                violations.append(1.0 if is_violation else 0.0)
-                if is_violation and bound > eps:
-                    magnitudes.append(V[k] / bound)
-
-        if len(rates) == 0:
-            nan = float("nan")
-            return {
-                "vc_rate_min": nan,
-                "vc_rate_max": nan,
-                "vc_rate_avg": nan,
-                "vc_rate_p95": nan,
-                "vc_rate_guaranteed_95": nan,
-                "vc_violation_rate": nan,
-                "vc_violation_magnitude": nan,
-            }
-
-        rates = np.asarray(rates)
-        return {
-            "vc_rate_min": float(np.min(rates)),
-            "vc_rate_max": float(np.max(rates)),
-            "vc_rate_avg": float(np.mean(rates)),
-            "vc_rate_p95": float(np.percentile(rates, 95)),
-            "vc_rate_guaranteed_95": float(np.percentile(rates, 5)),
-            "vc_violation_rate": float(np.mean(violations)),
-            "vc_violation_magnitude": (
-                float(np.mean(magnitudes)) if len(magnitudes) > 0 else 0.0
-            ),
-        }
-
     def mean_confidence_interval(self, data, confidence=0.95):
         n = len(data)
         data = np.array(data)
@@ -597,7 +346,6 @@ class Evaluator:
         dimension: int,
         C: float,
         lbd: float,
-        init_cost: float = 1.0,
     ):
         """Plot path tracking results and normalised tracking error.
 
@@ -716,13 +464,6 @@ class Evaluator:
                 rf"Theory: $\frac{{1}}{{1-\gamma}}\sqrt{{w_{{ub}}/w_{{lb}}}}\cdot\|e_0\|\,e^{{-\lambda t}}$"
             )
 
-        # Normalise by init_cost so the bound is on the *relative* error plot
-        theo_curve = (
-            theo_factor * np.exp(-lbd_design * timesteps)
-            if init_cost < 1e-8
-            else theo_factor * init_cost * np.exp(-lbd_design * timesteps) / init_cost
-        )
-        # Simplifies to: theo_factor * exp(-lbd_design * t)
         theo_curve = theo_factor * np.exp(-lbd_design * timesteps)
 
         ax2.plot(

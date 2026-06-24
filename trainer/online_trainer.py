@@ -91,7 +91,11 @@ class OnlineTrainer(Evaluator):
                     batch, progress=step / total_timesteps
                 )
 
-                pbar.update(batch["rewards"].shape[0])
+                n_steps = batch["rewards"].shape[0]
+                n_updates = int(loss_dict.get(
+                    f"{self.policy.name}/RL_analytics/n_updates", n_steps
+                ))
+                pbar.update(n_updates)
 
                 loss_dict[f"{self.policy.name}/RL_analytics/timesteps"] = step
                 loss_dict[f"{self.policy.name}/RL_analytics/sample_time"] = sample_time

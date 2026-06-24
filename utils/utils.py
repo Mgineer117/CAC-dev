@@ -1,6 +1,5 @@
 import numpy as np
 import torch
-import torch.nn as nn
 
 from envs import (
     CarEnv,
@@ -12,7 +11,7 @@ from envs import (
     SegwayEnv,
     TurtlebotEnv,
 )
-from policy import C3M, CARL, CARL_M, CORL, LQR, NCM, PPO, SD_LQR
+from policy import C3M, CARL, CARL_M, LQR, NCM, PPO, SAC, SD_LQR, TEMP
 from policy.cpo import CPO
 from policy.layers.CMG_networks_bounded import BoundedCCM_Generator
 from policy.layers.policy_networks import (
@@ -22,6 +21,7 @@ from policy.layers.policy_networks import (
     RLActor,
     RLCritic,
 )
+from policy.layers.sac_networks import SACActor
 from policy.trpo import TRPO
 
 
@@ -128,6 +128,19 @@ def _create_cmg(args, mode: str, device: torch.device):
     )
 
 
+def _action_bounds(env):
+    """Per-dim (scale, bias) of the residual-action box for SAC tanh squashing.
+
+    action = tanh(.) * scale + bias maps the unbounded pre-tanh into
+    [low, high] = env.action_space bounds.
+    """
+    low = np.asarray(env.action_space.low, dtype=np.float32)
+    high = np.asarray(env.action_space.high, dtype=np.float32)
+    scale = 0.5 * (high - low)
+    bias = 0.5 * (high + low)
+    return scale, bias
+
+
 def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
     algo = args.algo_name
     nupdates = args.timesteps / (args.minibatch_size * args.num_minibatch)
@@ -218,23 +231,7 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             w_lb=args.w_lb,
             num_minibatch=args.num_minibatch,
             minibatch_size=args.minibatch_size,
-            nupdates=args.c3m_epochs,
-            # optional SD-LQR CMG pretraining (the CORL recipe); reuses the corl-* args
-            pretrain_cmg=args.c3m_pretrain_cmg,
-            pretrain_c1c2=getattr(args, "c3m_pretrain_c1c2", False),
-            SDC_func=SDC_func,
-            Q_scaler=args.Q_scaler,
-            R_scaler=args.R_scaler,
-            pretrain_epochs=args.corl_pretrain_epochs,
-            pretrain_buffer_size=args.corl_pretrain_buffer_size,
-            pretrain_minibatch_size=args.corl_pretrain_minibatch_size,
-            pretrain_W_lr=args.corl_pretrain_W_lr,
-            val_split=args.corl_val_split,
-            val_interval=args.corl_val_interval,
-            plateau_tol=args.corl_plateau_tol,
-            plateau_patience=args.corl_plateau_patience,
-            logger=logger,
-            writer=writer,
+            nupdates=args.epochs,
             device=args.device,
         )
 
@@ -340,60 +337,94 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             num_minibatch=args.num_minibatch,
             minibatch_size=args.minibatch_size,
             cvstem_num_samples=args.cvstem_num_samples,
-            nupdates=args.c3m_epochs,
+            nupdates=args.epochs,
             num_windows=args.num_windows,
             device=args.device,
             logger=logger,
             writer=writer,
         )
 
-    elif algo == "corl":
-        CMG = _create_cmg(args, mode=args.cmg_mode, device=args.device)
-        actor, critic = _create_actor_critic(args)
-        data = env.get_rollout(args.c3m_buffer_size, mode="c3m")
-
-        return CORL(
+    elif algo == "sac":
+        scale, bias = _action_bounds(env)
+        actor = SACActor(
             x_dim=args.x_dim,
             u_dim=args.u_dim,
+            state_dim=args.state_dim,
+            hidden_dim=args.actor_dim,
+            action_scale=scale,
+            action_bias=bias,
+            num_windows=args.num_windows,
+            activation=getattr(args, "actor_activation", "relu"),
+        )
+        return SAC(
+            x_dim=args.x_dim,
+            u_dim=args.u_dim,
+            state_dim=args.state_dim,
+            actor=actor,
+            critic_dim=args.critic_dim,
+            gamma=gamma,
+            tau=args.sac_tau,
+            actor_lr=args.actor_lr,
+            critic_lr=args.critic_lr,
+            alpha_lr=args.sac_alpha_lr,
+            init_alpha=args.sac_init_alpha,
+            autotune_alpha=not args.sac_no_autotune_alpha,
+            buffer_size=args.sac_buffer_size,
+            sac_batch_size=args.sac_batch_size,
+            utd_ratio=args.sac_utd,
+            learning_starts=args.sac_learning_starts,
+            num_windows=args.num_windows,
+            nupdates=nupdates,
+            device=args.device,
+        )
+
+    elif algo in ("temp", "temp2"):
+        # CMG is trained jointly (no SD-LQR pretrain, no c1/c2): keep it trainable.
+        CMG = _create_cmg(args, mode=args.cmg_mode, device=args.device)
+        data = env.get_rollout(args.c3m_buffer_size, mode="c3m")
+        scale, bias = _action_bounds(env)
+
+        return TEMP(
+            x_dim=args.x_dim,
+            u_dim=args.u_dim,
+            state_dim=args.state_dim,
             CMG=CMG,
             get_f_and_B=get_f_and_B,
             data=data,
-            actor=actor,
-            critic=critic,
-            SDC_func=SDC_func,
-            Q_scaler=args.Q_scaler,
-            R_scaler=args.R_scaler,
-            pretrain_epochs=args.corl_pretrain_epochs,
-            pretrain_buffer_size=args.corl_pretrain_buffer_size,
-            pretrain_minibatch_size=args.corl_pretrain_minibatch_size,
-            pretrain_W_lr=args.corl_pretrain_W_lr,
-            val_split=args.corl_val_split,
-            val_interval=args.corl_val_interval,
-            plateau_tol=args.corl_plateau_tol,
-            plateau_patience=args.corl_plateau_patience,
-            W_lr=args.W_lr,
+            action_scale=scale,
+            action_bias=bias,
+            actor_dim=args.actor_dim,
+            critic_dim=args.critic_dim,
+            actor_activation=getattr(args, "actor_activation", "relu"),
+            optimal_policy=args.temp_optimal_policy,
+            con_only=(algo == "temp2"),
+            gamma_contracting=args.temp_gamma_contracting,
+            gamma_optimal=args.temp_gamma_optimal if args.temp_gamma_optimal is not None else gamma,
+            tau=args.sac_tau,
             actor_lr=args.actor_lr,
             critic_lr=args.critic_lr,
-            num_minibatch=args.num_minibatch,
-            minibatch_size=args.minibatch_size,
+            alpha_lr=args.sac_alpha_lr,
+            init_alpha=args.sac_init_alpha,
+            autotune_alpha=not args.sac_no_autotune_alpha,
+            W_lr=args.W_lr,
             w_ub=args.w_ub,
             w_lb=args.w_lb,
             lbd=args.lbd,
             eps=args.eps,
-            eps_clip=args.eps_clip,
             W_entropy_scaler=args.W_entropy_scaler,
-            entropy_scaler=args.entropy_scaler,
+            cmg_minibatch_size=args.minibatch_size,
+            cmg_updates_per_iter=args.temp_cmg_updates_per_iter,
             tracking_scaler=env.tracking_scaler,
             control_scaler=env.control_scaler,
-            target_kl=args.target_kl,
-            num_windows=args.num_windows,
-            gamma=gamma,
-            gae=args.gae,
+            eps_clip=args.eps_clip,
             K=args.k_epochs,
+            gae=args.gae,
+            target_kl=args.target_kl,
+            entropy_scaler=args.entropy_scaler,
+            num_minibatch=args.num_minibatch,
+            minibatch_size=args.minibatch_size,
+            num_windows=args.num_windows,
             nupdates=nupdates,
-            policy_updates_per_cmg_update=args.policy_updates_per_cmg_update,
-            logger=logger,
-            writer=writer,
             device=args.device,
         )
 

@@ -24,8 +24,6 @@ class Utilities(nn.Module):
         self.Cu_eigenvalues_records = []
         self.dot_M_eigenvalues_records = []
         self.sym_mabk_eigenvalues_records = []
-        self.C1_eigenvalues_records = []
-        self.C2_loss_records = []
         self.overshoot_records = []
 
         # Common loss functions
@@ -118,121 +116,55 @@ class Utilities(nn.Module):
                 norm_dict[dir + "/weight/" + names[i]] = total_norm.item()
         return norm_dict
 
-    def record_eigenvalues(self, Cu, dot_M, sym_MABK, C1, C2, overshoot):
-        """Records the eigenvalues of various matrices for logging."""
+    def record_eigenvalues(self, Cu, dot_M, sym_MABK, overshoot):
+        """Records the eigenvalues of Cu, dot_M, sym_MABK, and overshoot for logging."""
         with torch.no_grad():
-            dot_M_eig = self.get_matrix_eig(dot_M)
-            sym_MABK_eig = self.get_matrix_eig(sym_MABK)
-            overshoot_eig = self.get_matrix_eig(overshoot)
-            Cu_eig = self.get_matrix_eig(Cu)
-            C1_eig = self.get_matrix_eig(C1)
-
-            self.Cu_eigenvalues_records.append(Cu_eig)
-            self.dot_M_eigenvalues_records.append(dot_M_eig)
-            self.sym_mabk_eigenvalues_records.append(sym_MABK_eig)
-            self.C1_eigenvalues_records.append(C1_eig)
-            self.C2_loss_records.append(C2.cpu().numpy())
-            self.overshoot_records.append(overshoot_eig)
+            self.Cu_eigenvalues_records.append(self.get_matrix_eig(Cu))
+            self.dot_M_eigenvalues_records.append(self.get_matrix_eig(dot_M))
+            self.sym_mabk_eigenvalues_records.append(self.get_matrix_eig(sym_MABK))
+            self.overshoot_records.append(self.get_matrix_eig(overshoot))
 
     def get_eigenvalue_plot(self):
         """Generates a Matplotlib figure of the recorded eigenvalues."""
         num = 10
-        if (
-            len(self.Cu_eigenvalues_records) < num
-            or len(self.C1_eigenvalues_records) < num
-        ):
-            return None  # Not enough data to plot
+        if len(self.Cu_eigenvalues_records) < num:
+            return None
 
         x = list(range(0, len(self.Cu_eigenvalues_records), num))
 
-        Cu_eig_array = np.asarray(self.Cu_eigenvalues_records[::num])
-        dot_M_eig_array = np.asarray(self.dot_M_eigenvalues_records[::num])
-        sym_MABK_eig_array = np.asarray(self.sym_mabk_eigenvalues_records[::num])
-        C1_eig_array = np.asarray(self.C1_eigenvalues_records[::num])
-        C2_loss = np.asarray(self.C2_loss_records[::num])
-        overshoot_eig_array = np.asarray(self.overshoot_records[::num])
+        def _stats(records):
+            arr = np.asarray(records[::num])
+            return arr.mean(axis=1), arr.max(axis=1), arr.min(axis=1)
 
-        Cu_mean, Cu_max, Cu_min = (
-            Cu_eig_array.mean(axis=1),
-            Cu_eig_array.max(axis=1),
-            Cu_eig_array.min(axis=1),
-        )
-        dot_M_mean, dot_M_max, dot_M_min = (
-            dot_M_eig_array.mean(axis=1),
-            dot_M_eig_array.max(axis=1),
-            dot_M_eig_array.min(axis=1),
-        )
-        sym_MABK_mean, sym_MABK_max, sym_MABK_min = (
-            sym_MABK_eig_array.mean(axis=1),
-            sym_MABK_eig_array.max(axis=1),
-            sym_MABK_eig_array.min(axis=1),
-        )
-        C1_mean, C1_max, C1_min = (
-            C1_eig_array.mean(axis=1),
-            C1_eig_array.max(axis=1),
-            C1_eig_array.min(axis=1),
-        )
-        overshoot_mean, overshoot_max, overshoot_min = (
-            overshoot_eig_array.mean(axis=1),
-            overshoot_eig_array.max(axis=1),
-            overshoot_eig_array.min(axis=1),
-        )
+        Cu_mean, Cu_max, Cu_min = _stats(self.Cu_eigenvalues_records)
+        dM_mean, dM_max, dM_min = _stats(self.dot_M_eigenvalues_records)
+        sm_mean, sm_max, sm_min = _stats(self.sym_mabk_eigenvalues_records)
+        os_mean, os_max, os_min = _stats(self.overshoot_records)
 
-        fig, ax = plt.subplots(2, 3, figsize=(12, 6))
+        fig, ax = plt.subplots(2, 2, figsize=(10, 6))
 
-        ax[0, 0].plot(
-            x, Cu_mean, label=f"Cu Mean (max={Cu_max[-1]:.3g}, min={Cu_min[-1]:.3g})"
-        )
+        ax[0, 0].plot(x, Cu_mean, label=f"Cu (max={Cu_max[-1]:.3g}, min={Cu_min[-1]:.3g})")
         ax[0, 0].fill_between(x, Cu_max, Cu_min, alpha=0.2)
         ax[0, 0].set_title("Cu Eigenvalues")
-        ax[0, 0].legend()
 
-        ax[0, 1].plot(
-            x,
-            dot_M_mean,
-            label=f"Dot M Mean (max={dot_M_max[-1]:.3g}, min={dot_M_min[-1]:.3g})",
-        )
-        ax[0, 1].fill_between(x, dot_M_max, dot_M_min, alpha=0.2)
+        ax[0, 1].plot(x, dM_mean, label=f"Dot M (max={dM_max[-1]:.3g}, min={dM_min[-1]:.3g})")
+        ax[0, 1].fill_between(x, dM_max, dM_min, alpha=0.2)
         ax[0, 1].set_title("Dot M Eigenvalues")
-        ax[0, 1].legend()
 
-        ax[0, 2].plot(
-            x,
-            sym_MABK_mean,
-            label=f"Sym MABK Mean (max={sym_MABK_max[-1]:.3g}, min={sym_MABK_min[-1]:.3g})",
-        )
-        ax[0, 2].fill_between(x, sym_MABK_max, sym_MABK_min, alpha=0.2)
-        ax[0, 2].set_title("Sym MABK Eigenvalues")
-        ax[0, 2].legend()
+        ax[1, 0].plot(x, sm_mean, label=f"Sym MABK (max={sm_max[-1]:.3g}, min={sm_min[-1]:.3g})")
+        ax[1, 0].fill_between(x, sm_max, sm_min, alpha=0.2)
+        ax[1, 0].set_title("Sym MABK Eigenvalues")
 
-        ax[1, 0].plot(
-            x, C1_mean, label=f"C1 Mean (max={C1_max[-1]:.3g}, min={C1_min[-1]:.3g})"
-        )
-        ax[1, 0].fill_between(x, C1_max, C1_min, alpha=0.2)
-        ax[1, 0].set_title("C1 Eigenvalues")
-        ax[1, 0].legend()
+        ax[1, 1].plot(x, os_mean, label=f"Overshoot (max={os_max[-1]:.3g}, min={os_min[-1]:.3g})")
+        ax[1, 1].fill_between(x, os_max, os_min, alpha=0.2)
+        ax[1, 1].set_title("Overshoot Eigenvalues")
 
-        ax[1, 1].plot(x, C2_loss, label=f"C2 loss = {C2_loss[-1]:.3g}")
-        ax[1, 1].set_title("C2 Loss")
-        ax[1, 1].set_yscale("log")
-        ax[1, 1].legend()
-
-        ax[1, 2].plot(
-            x,
-            overshoot_mean,
-            label=f"Overshoot Mean (max={overshoot_max[-1]:.3g}, min={overshoot_min[-1]:.3g})",
-        )
-        ax[1, 2].fill_between(x, overshoot_max, overshoot_min, alpha=0.2)
-        ax[1, 2].set_title("Overshoot Eigs")
-        ax[1, 2].legend()
-
-        for i in range(2):
-            for j in range(3):
-                ax[i, j].grid(linestyle="--", alpha=0.5)
+        for a in ax.flat:
+            a.legend()
+            a.grid(linestyle="--", alpha=0.5)
 
         plt.tight_layout()
-        plt.close(fig)  # Close the figure to prevent display issues
-
+        plt.close(fig)
         return fig
 
 

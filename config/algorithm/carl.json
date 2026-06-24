@@ -5,6 +5,13 @@
     "W_entropy_scaler": 0.001,
     "num_windows": 1,
     "policy_type": "CL",
-    "reward_mode": "inverse"
-    
+    "reward_mode": "inverse",
+    "cartpole_lbd": 0.5,
+    "flapper_lbd": 0.5,
+    "car_lbd": 0.5,
+    "pvtol_lbd": 0.5,
+    "turtlebot_lbd": 0.5,
+    "segway_lbd": 0.5,
+    "quadrotor_lbd": 0.5,
+    "neurallander_lbd": 0.5
 }

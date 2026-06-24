@@ -1,0 +1,252 @@
+import os
+import time
+from collections import deque
+from copy import deepcopy
+
+import gymnasium as gym
+import numpy as np
+import torch
+import torch.nn as nn
+from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
+
+from log.wandb_logger import WandbLogger
+from policy.base import Base
+from trainer.evaluator import Evaluator
+
+
+class C3MTrainer(Evaluator):
+    def __init__(
+        self,
+        env: gym.Env,
+        eval_env: gym.Env,
+        policy: Base,
+        logger: WandbLogger,
+        writer: SummaryWriter,
+        init_epochs: int = 0,
+        epochs: int = 10000,
+        log_interval: int = 2,
+        eval_num: int = 10,
+        eval_episodes: int = 10,
+        seed: int = 0,
+        rendering: bool = False,
+    ) -> None:
+        super().__init__(
+            env=env,
+            eval_env=eval_env,
+            policy=policy,
+            logger=logger,
+            writer=writer,
+            init_epochs=init_epochs,
+            epochs=epochs,
+            log_interval=log_interval,
+            eval_num=eval_num,
+            eval_episodes=eval_episodes,
+            seed=seed,
+            rendering=rendering,
+        )
+
+    def train(self) -> dict[str, float]:
+        start_time = time.time()
+
+        self.last_perf_score = deque(maxlen=1)
+
+        # Train loop
+        batch_size = 2048
+        eval_idx = 0
+        self.policy.train()
+        with tqdm(
+            initial=self.init_epochs,
+            total=(self.epochs + self.init_epochs),
+            desc=f"{self.policy.name} Training (Epochs)",
+        ) as pbar:
+            while pbar.n < (self.epochs + self.init_epochs):
+                step = pbar.n + 1  # + 1 to avoid zero division
+                logging_step = (step - self.init_epochs) * batch_size + self.init_epochs
+
+                loss_dict, supp_dict, update_time = self.policy.learn()
+
+                # Calculate expected remaining time
+                pbar.update(1)
+
+                # Update environment steps and calculate time metrics
+                loss_dict[f"{self.policy.name}/analytics/timesteps"] = logging_step
+                loss_dict[f"{self.policy.name}/analytics/update_time"] = update_time
+
+                self.write_log(loss_dict, step=logging_step)
+                self.write_image(
+                    supp_dict,
+                    step=logging_step,
+                )
+
+                #### EVALUATIONS ####
+                if step >= (self.eval_interval * eval_idx + self.init_epochs):
+                    ### Eval Loop
+                    self.policy.eval()
+                    eval_idx += 1
+
+                    eval_dict, supp_dict = self.evaluate()
+
+                    # Manual logging
+                    self.write_log(eval_dict, step=logging_step, eval_log=True)
+                    self.write_image(supp_dict, step=logging_step)
+                    self.last_perf_score.append(eval_dict["eval/performance_score"])
+
+                    self.save_model(logging_step)
+
+            torch.cuda.empty_cache()
+
+        self.logger.print(
+            "total dynamics model training time: {:.2f} hours".format(
+                (time.time() - start_time) / 3600
+            )
+        )
+
+    def save_model(self, e):
+        ### save checkpoint
+        name = f"model_{e}.pth"
+        path = os.path.join(self.logger.checkpoint_dir, name)
+
+        model = (
+            getattr(self.policy, "u_func", None)
+            or getattr(self.policy, "actor", None)
+            or self.policy
+        )
+
+        if model is not None:
+            model = deepcopy(model).to("cpu")
+            torch.save(model.state_dict(), path)
+
+            # save the best model when performance_score (λ/C) improves
+            if np.mean(self.last_perf_score) > self.last_max_perf_score:
+                name = f"best_model.pth"
+                path = os.path.join(self.logger.log_dir, name)
+                torch.save(model.state_dict(), path)
+
+                self.last_max_perf_score = np.mean(self.last_perf_score)
+        else:
+            raise ValueError("Error: Model is not identifiable!!!")
+
+
+class DynamicsTrainer(Evaluator):
+    def __init__(
+        self,
+        env: gym.Env,
+        Dynamic_func: nn.Module,
+        logger: WandbLogger,
+        writer: SummaryWriter,
+        buffer_size: int = 200_000,
+        epochs: int = 10000,
+    ) -> None:
+        self.env = env
+        self.Dynamic_func = Dynamic_func
+        self.logger = logger
+        self.writer = writer
+
+        # training parameters
+        self.buffer_size = buffer_size
+        self.epochs = epochs
+
+    def train(self) -> dict[str, float]:
+        start_time = time.time()
+
+        # Train loop
+        data = self.env.get_rollout(self.buffer_size, mode="dynamics")
+        self.Dynamic_func.train()
+        with tqdm(
+            total=self.epochs, desc=f"{self.Dynamic_func.name} Training (Epochs)"
+        ) as pbar:
+            while pbar.n < self.epochs:
+                step = pbar.n + 1  # + 1 to avoid zero division
+
+                # first sample batch (size of 1024) from the data
+                batch = dict()
+                indices = np.random.choice(self.buffer_size, size=1024, replace=False)
+                for key in data.keys():
+                    # Sample a batch of 1024
+                    batch[key] = data[key][indices]
+
+                loss_dict, update_time = self.Dynamic_func.learn(batch)
+
+                # Calculate expected remaining time
+                pbar.update(1)
+
+                # Update environment steps and calculate time metrics
+                loss_dict[f"{self.Dynamic_func.name}/analytics/timesteps"] = step
+                loss_dict[f"{self.Dynamic_func.name}/analytics/update_time"] = (
+                    update_time
+                )
+
+                self.write_log(loss_dict, step=step)
+
+            torch.cuda.empty_cache()
+
+        self.logger.print(
+            "total dynamics model training time: {:.2f} hours".format(
+                (time.time() - start_time) / 3600
+            )
+        )
+
+
+class SDCTrainer(Evaluator):
+    def __init__(
+        self,
+        env: gym.Env,
+        SDC_func: nn.Module,
+        logger: WandbLogger,
+        writer: SummaryWriter,
+        buffer_size: int = 10_000,
+        init_epochs: int = 0,
+        epochs: int = 10000,
+    ) -> None:
+        self.env = env
+        self.SDC_func = SDC_func
+        self.logger = logger
+        self.writer = writer
+
+        # training parameters
+        self.buffer_size = buffer_size
+        self.init_epochs = init_epochs
+        self.epochs = epochs
+
+    def train(self) -> dict[str, float]:
+        start_time = time.time()
+
+        # Train loop
+        batch_size = 1024
+        data = self.env.get_rollout(self.buffer_size, mode="c3m")
+        self.SDC_func.train()
+        with tqdm(
+            initial=self.init_epochs,
+            total=(self.epochs + self.init_epochs),
+            desc=f"{self.SDC_func.name} Training (Epochs)",
+        ) as pbar:
+            while pbar.n < (self.epochs + self.init_epochs):
+                step = pbar.n + 1  # + 1 to avoid zero division
+
+                # first sample batch (size of 1024) from the data
+                batch = dict()
+                indices = np.random.choice(
+                    self.buffer_size, size=batch_size, replace=False
+                )
+                for key in data.keys():
+                    # Sample a batch of 1024
+                    batch[key] = data[key][indices]
+
+                loss_dict, update_time = self.SDC_func.learn(batch)
+
+                # Calculate expected remaining time
+                pbar.update(1)
+
+                # Update environment steps and calculate time metrics
+                loss_dict[f"{self.SDC_func.name}/analytics/update_time"] = update_time
+
+                self.write_log(loss_dict, step=step)
+
+            torch.cuda.empty_cache()
+
+        self.logger.print(
+            "total sdc model training time: {:.2f} hours".format(
+                (time.time() - start_time) / 3600
+            )
+        )

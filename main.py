@@ -12,7 +12,8 @@ import torch
 import wandb
 from torch.utils.tensorboard import SummaryWriter
 
-from trainer.offline_trainer import C3MTrainer
+from trainer.c3m_trainer import C3MTrainer
+from trainer.offpolicy_trainer import OffPolicyTrainer, OnPolicyTEMPTrainer
 from trainer.online_trainer import OnlineTrainer
 from utils.get_args import get_args
 from utils.get_dynamics import get_dynamics
@@ -58,7 +59,53 @@ def run(args, seed, unique_id, exp_time):
         except Exception:
             pass
 
-    if args.algo_name.startswith(("carl", "corl", "ppo", "trpo", "cpo")):
+    if args.algo_name in ("temp", "temp2"):
+        if args.temp_optimal_policy == "sac":
+            trainer = OffPolicyTrainer(
+                env=env,
+                eval_env=eval_env,
+                policy=policy,
+                logger=logger,
+                writer=writer,
+                init_epochs=init_epochs,
+                epochs=args.epochs,
+                log_interval=args.log_interval,
+                eval_num=args.eval_num,
+                eval_episodes=args.eval_episodes,
+                seed=args.seed,
+                rendering=args.rendering,
+                buffer_size=args.sac_buffer_size,
+                batch_size=args.sac_batch_size,
+                learning_starts=args.sac_learning_starts,
+                utd_ratio=args.sac_utd,
+                cmg_update_freq=int(args.minibatch_size * args.num_minibatch),
+                cmg_updates_per_iter=args.temp_cmg_updates_per_iter,
+            )
+        else:  # ppo
+            sampler = OnlineSampler(
+                state_dim=args.state_dim,
+                u_dim=args.u_dim,
+                episode_len=args.episode_len,
+                batch_size=int(args.minibatch_size * args.num_minibatch),
+            )
+            trainer = OnPolicyTEMPTrainer(
+                env=env,
+                eval_env=eval_env,
+                policy=policy,
+                sampler=sampler,
+                logger=logger,
+                writer=writer,
+                init_epochs=init_epochs,
+                timesteps=args.timesteps,
+                log_interval=args.log_interval,
+                eval_num=args.eval_num,
+                eval_episodes=args.eval_episodes,
+                seed=args.seed,
+                rendering=args.rendering,
+                cmg_updates_per_iter=args.temp_cmg_updates_per_iter,
+            )
+        trainer.train()
+    elif args.algo_name.startswith(("carl", "sac", "ppo", "trpo", "cpo")):
         sampler = OnlineSampler(
             state_dim=args.state_dim,
             u_dim=args.u_dim,
@@ -90,7 +137,7 @@ def run(args, seed, unique_id, exp_time):
             logger=logger,
             writer=writer,
             init_epochs=init_epochs,
-            epochs=args.c3m_epochs,
+            epochs=args.epochs,
             log_interval=args.log_interval,
             eval_num=args.eval_num,
             eval_episodes=args.eval_episodes,

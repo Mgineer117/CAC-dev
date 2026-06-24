@@ -108,6 +108,11 @@ def override_args(init_args):
         if hasattr(args, k):
             setattr(args, k, v)
 
+    # lbd is per-algo per-task: read "{task}_lbd" from the algo JSON if present.
+    task_lbd_key = f"{args.task}_lbd"
+    if task_lbd_key in algo_params:
+        args.lbd = algo_params[task_lbd_key]
+
     return args
 
 

@@ -1,7 +1,6 @@
 {
-    "c3m_epochs": 30000,
-    "timesteps": 5e7,
-    "lbd": 0.5,
+    "epochs": 30000,
+    "timesteps": 50000000.0,
     "u_lr": 0.0001,
     "w_ub": 10.0,
     "w_lb": 0.01,

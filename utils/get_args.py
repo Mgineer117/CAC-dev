@@ -40,7 +40,7 @@ def get_args():
     # --- contraction ---
     p.add_argument("--w-ub", type=float, default=None, help="Contraction metric upper bound.")
     p.add_argument("--w-lb", type=float, default=None, help="Contraction metric lower bound.")
-    p.add_argument("--lbd", type=float, default=None, help="Desired contraction rate.")
+    p.add_argument("--lbd", type=float, default=0.5, help="Desired contraction rate.")
     p.add_argument("--eps", type=float, default=0.1, help="CMG regularization.")
 
     # --- PPO / TRPO ---
@@ -60,9 +60,6 @@ def get_args():
     p.add_argument("--cvstem-no-dwdt", action="store_true", help="NCM: drop (W-I)/dt term.")
 
     # --- CORL / CMG pretraining ---
-    p.add_argument("--c3m-pretrain-cmg", action="store_true", help="C3M: warm-start CMG with SD-LQR recipe.")
-    p.add_argument("--c3m-pretrain-c1c2", action="store_true",
-                   help="C3M: also minimize the C1/C2 (Bbot-projected) conditions during CMG warm-start.")
     p.add_argument("--Q-scaler", type=float, default=1.0, help="CORL: state cost for SD-LQR Riccati.")
     p.add_argument("--R-scaler", type=float, default=0.0, help="CORL: control cost for SD-LQR Riccati.")
     p.add_argument("--corl-pretrain-epochs", type=int, default=10000)
@@ -74,6 +71,26 @@ def get_args():
     p.add_argument("--corl-plateau-tol", type=float, default=1e-3, help="CORL: relative MA change threshold.")
     p.add_argument("--corl-plateau-patience", type=int, default=3, help="CORL: consecutive plateaus to early-stop.")
 
+    # --- SAC (and the SAC cores inside `temp`) ---
+    p.add_argument("--sac-tau", type=float, default=5e-3, help="Polyak averaging coefficient for target critics.")
+    p.add_argument("--sac-alpha-lr", type=float, default=3e-4, help="Entropy temperature learning rate.")
+    p.add_argument("--sac-init-alpha", type=float, default=0.2, help="Initial entropy temperature alpha.")
+    p.add_argument("--sac-no-autotune-alpha", action="store_true", help="Disable automatic entropy tuning (fix alpha).")
+    p.add_argument("--sac-buffer-size", type=int, default=1_000_000, help="Replay buffer capacity.")
+    p.add_argument("--sac-batch-size", type=int, default=256, help="Replay minibatch size for SAC updates.")
+    p.add_argument("--sac-utd", type=float, default=1.0, help="Update-to-data ratio (gradient steps per new env step).")
+    p.add_argument("--sac-learning-starts", type=int, default=5000, help="Env steps to collect before SAC updates begin.")
+
+    # --- TEMP (contracting-policy CMG synthesis; replaces corl) ---
+    p.add_argument("--temp-optimal-policy", type=str, default="sac", choices=["sac", "ppo"],
+                   help="Deployed high-discount policy: a second SAC or on-policy PPO.")
+    p.add_argument("--temp-gamma-contracting", type=float, default=0.0,
+                   help="Discount of the contracting policy that drives the CMG (gamma -> 0).")
+    p.add_argument("--temp-gamma-optimal", type=float, default=None,
+                   help="Discount of the deployed optimal policy (defaults to --gamma).")
+    p.add_argument("--temp-cmg-updates-per-iter", type=int, default=50,
+                   help="CMG pd-loss gradient steps per training iteration.")
+
     # --- network architecture ---
     p.add_argument("--dynamic-dim", type=list, default=[256, 256], help="Dynamics net hidden dims.")
     p.add_argument("--cmg-hidden-dims", type=list, default=[128, 128])
@@ -84,7 +101,7 @@ def get_args():
     p.add_argument("--critic-dim", type=list, default=[256, 256])
 
     # --- training schedule ---
-    p.add_argument("--c3m-epochs", type=int, default=None)
+    p.add_argument("--epochs", type=int, default=None)
     p.add_argument("--dynamics-epochs", type=int, default=20000)
     p.add_argument("--sdc-epochs", type=int, default=2000)
     p.add_argument("--timesteps", type=int, default=None)

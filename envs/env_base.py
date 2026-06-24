@@ -396,7 +396,7 @@ class BaseEnv(gym.Env):
         emp_bound = None
         emp_bound_arr = None
         policy_name = self.policy.__class__.__name__.lower() if hasattr(self, "policy") else ""
-        if policy_name in ["c3m", "lqr", "carl", "carl_m", "corl", "trpo", "cpo", "sd_lqr", "ppo", "cac", "algorithm"]:
+        if policy_name in ["c3m", "lqr", "carl", "carl_m", "temp", "sac", "trpo", "cpo", "sd_lqr", "ppo", "cac", "algorithm"]:
             lbd        = float(getattr(self.policy, "lbd", 0.0) or 0.0)
             gamma      = float(getattr(self.policy, "gamma", 1.0))
             w_ub       = float(getattr(self.policy, "w_ub", 1.0) or 1.0)

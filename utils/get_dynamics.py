@@ -10,7 +10,7 @@ def get_dynamics(env, args, logger, writer):
         "lqr-approx",
     ]:
         from policy.layers.dynamic_networks import DynamicLearner
-        from trainer.offline_trainer import DynamicsTrainer
+        from trainer.c3m_trainer import DynamicsTrainer
 
         print("[INFO] Learning a dynamics approximator.")
         # learn dynamics

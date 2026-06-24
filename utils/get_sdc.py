@@ -1,13 +1,10 @@
 from policy.layers.sd_lqr_networks import SDCLearner
-from trainer.offline_trainer import SDCTrainer
+from trainer.c3m_trainer import SDCTrainer
 
 def get_SDC(env, args, logger, writer, get_f_and_B, init_epochs):
     
 
-    # C3M needs the SDC decomposition network too when CMG pretraining is enabled.
-    needs_sdc = args.algo_name in ("sd-lqr", "sd-lqr-approx", "corl") or (
-        args.algo_name == "c3m" and getattr(args, "c3m_pretrain_cmg", False)
-    )
+    needs_sdc = args.algo_name in ("sd-lqr", "sd-lqr-approx")
     if needs_sdc:
         SDC_func = SDCLearner(
             x_dim=env.num_dim_x,

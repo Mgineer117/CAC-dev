@@ -19,17 +19,6 @@ def train():
     # --- searched hyperparameters ---
     if "lbd" in config:
         args.lbd = config.lbd
-    # Whether to warm-start the CMG with the SD-LQR contraction (pd) pretraining.
-    if "c3m_pretrain_cmg" in config:
-        args.c3m_pretrain_cmg = bool(config.c3m_pretrain_cmg)
-    # Whether to prepend a C1/C2 init phase BEFORE the contraction (pd) pretraining.
-    # Pipeline when both are True:
-    #   Phase 1: minimize C1/C2 loss (initialize network geometry)
-    #   Phase 2: only enforce contraction (pd) loss
-    # c3m_pretrain_c1c2 is forced to False when c3m_pretrain_cmg is False.
-    if "c3m_pretrain_c1c2" in config:
-        pretrain_cmg_active = getattr(args, "c3m_pretrain_cmg", False)
-        args.c3m_pretrain_c1c2 = bool(config.c3m_pretrain_c1c2) and pretrain_cmg_active
 
     # --- fixed CMG configuration (no longer searched) ---
     args.cmg_activation = "tanh"
@@ -55,8 +44,8 @@ def train():
 
     # Shorten each sweep trial to 1/5 of the configured C3M training length so the
     # search explores more hyperparameter combinations in the same wall-clock budget.
-    if getattr(args, "c3m_epochs", None) is not None:
-        args.c3m_epochs = max(1, int(args.c3m_epochs / 5))
+    if getattr(args, "epochs", None) is not None:
+        args.epochs = max(1, int(args.epochs / 5))
 
     print(f"-------------------------------------------------------")
     print(f"      C3M Sweep Trial ID: {unique_id}")
@@ -99,18 +88,6 @@ if __name__ == "__main__":
                 "lbd": {
                     "min": 0.01,
                     "max": 3.0
-                },
-                # Warm-start the CMG with SD-LQR contraction pretraining or not.
-                "c3m_pretrain_cmg": {
-                    "values": [True, False]
-                },
-                # Prepend a C1/C2 init phase before the contraction (pd) pretraining.
-                # Pipeline when both c3m_pretrain_cmg=True and c3m_pretrain_c1c2=True:
-                #   Phase 1: minimize C1/C2 loss (initialize network geometry)
-                #   Phase 2: only enforce contraction (pd) loss
-                # Forced to False in train() when c3m_pretrain_cmg=False.
-                "c3m_pretrain_c1c2": {
-                    "values": [True, False]
                 },
             }
         }

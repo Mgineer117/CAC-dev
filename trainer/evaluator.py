@@ -143,7 +143,7 @@ class Evaluator:
                 dtype=self.policy._dtype,
             )
             M = torch.linalg.solve(W, I.unsqueeze(0).expand(n, -1, -1))
-            eigs = torch.linalg.eigvalsh(M).cpu().numpy()  # (n, x_dim), ascending
+            eigs = torch.linalg.eigvalsh(M.cpu()).numpy()  # (n, x_dim), ascending
 
         empirical_min_eig = float(eigs[:, 0].min())
         empirical_max_eig = float(eigs[:, -1].max())
@@ -518,7 +518,7 @@ class Evaluator:
             bound_label = rf"Theory: $\sqrt{{w_{{ub}}/w_{{lb}}}}\,e^{{-\lambda t}}$"
         else:
             theo_factor = (1.0 / max(1.0 - gamma, 1e-8)) * np.sqrt(cond)
-            bound_label = rf"Theory (std): $\frac{{1}}{{1-\gamma}}\sqrt{{w_{{ub}}/w_{{lb}}}}\,e^{{-\lambda t}}$"
+            bound_label = rf"Theory: $\frac{{1}}{{1-\gamma}}\sqrt{{w_{{ub}}/w_{{lb}}}}\,e^{{-\lambda t}}$"
 
         ax2.plot(
             timesteps,
@@ -529,35 +529,7 @@ class Evaluator:
             label=bound_label,
         )
 
-        # Accelerated IES bound in Euclidean space (no CMG calls during rollout).
-        # Theorem gives C(s_k) ≤ κ C(s_0) exp(−2λ̄(0,k)kΔt).  Converting to
-        # Euclidean via metric eigenvalue bounds and estimating λ̄ from the
-        # observed error ratio yields:  bound(k) = κ · ⟨‖e_k‖²/‖e_0‖²⟩
-        # where κ = w_ub/w_lb (design) or emp_cond (empirical).
-        if error_trajectories and cond > 1.0:
-            min_len = min(len(t) for t in error_trajectories)
-            mean_err = np.mean(
-                [np.array(t[:min_len]) for t in error_trajectories], axis=0
-            )
-            ax2.plot(
-                timesteps[:min_len],
-                cond * mean_err,
-                linestyle="--",
-                color="navy",
-                linewidth=1.8,
-                label=rf"Theory (accel.): $\kappa\langle e^2\rangle/e_0^2$ ($\kappa={cond:.1f}$)",
-            )
-            if emp_cond is not None:
-                ax2.plot(
-                    timesteps[:min_len],
-                    emp_cond * mean_err,
-                    linestyle=(0, (3, 1, 1, 1)),
-                    color="mediumseagreen",
-                    linewidth=1.8,
-                    label=rf"Practical (accel.): $\hat\kappa\langle e^2\rangle/e_0^2$ ($\hat\kappa={emp_cond:.1f}$)",
-                )
-
-        # Practical standard bound — replaces design sqrt(κ) with empirical sqrt(κ̂)
+        # Practical bound — replaces design sqrt(κ) with empirical sqrt(κ̂)
         if emp_cond is not None:
             sqrt_emp_cond = np.sqrt(emp_cond)
             if policy_name == "c3m":
@@ -570,7 +542,7 @@ class Evaluator:
                 linestyle=":",
                 color="darkorange",
                 linewidth=1.8,
-                label=rf"Practical (std): $\sqrt{{\hat\kappa}}\,e^{{-\lambda t}}$ ($\hat\kappa={emp_cond:.1f}$)",
+                label=rf"Practical: $\sqrt{{\hat\kappa}}\,e^{{-\lambda t}}$ ($\hat\kappa={emp_cond:.1f}$)",
             )
 
         ax2.set_xlabel("Time (s)", fontsize=16)

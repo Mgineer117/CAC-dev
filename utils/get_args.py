@@ -59,18 +59,6 @@ def get_args():
     p.add_argument("--cvstem-no-linesearch", action="store_true", help="NCM: disable alpha line search.")
     p.add_argument("--cvstem-no-dwdt", action="store_true", help="NCM: drop (W-I)/dt term.")
 
-    # --- CORL / CMG pretraining ---
-    p.add_argument("--Q-scaler", type=float, default=1.0, help="CORL: state cost for SD-LQR Riccati.")
-    p.add_argument("--R-scaler", type=float, default=0.0, help="CORL: control cost for SD-LQR Riccati.")
-    p.add_argument("--corl-pretrain-epochs", type=int, default=10000)
-    p.add_argument("--corl-pretrain-buffer-size", type=int, default=10000)
-    p.add_argument("--corl-pretrain-minibatch-size", type=int, default=1024)
-    p.add_argument("--corl-pretrain-W-lr", type=float, default=1e-3, help="CORL: CMG pretrain LR (cosine-annealed).")
-    p.add_argument("--corl-val-split", type=float, default=0.1, help="CORL: held-out fraction for early stopping.")
-    p.add_argument("--corl-val-interval", type=int, default=25)
-    p.add_argument("--corl-plateau-tol", type=float, default=1e-3, help="CORL: relative MA change threshold.")
-    p.add_argument("--corl-plateau-patience", type=int, default=3, help="CORL: consecutive plateaus to early-stop.")
-
     # --- SAC (and the SAC cores inside `temp`) ---
     p.add_argument("--sac-tau", type=float, default=5e-3, help="Polyak averaging coefficient for target critics.")
     p.add_argument("--sac-alpha-lr", type=float, default=3e-4, help="Entropy temperature learning rate.")

@@ -85,16 +85,6 @@ def add_cli(parser):
     )
 
 
-def prep_args(args, search_args):
-    # Shorten each trial to 1/5 of the configured training length so the search
-    # explores more combinations per wall-clock hour. SAC-optimal runs use epochs,
-    # PPO-optimal runs use timesteps; shorten whichever the trainer consumes.
-    if getattr(args, "epochs", None) is not None:
-        args.epochs = max(1, int(args.epochs / 5))
-    if getattr(args, "timesteps", None) is not None:
-        args.timesteps = max(1, int(args.timesteps / 5))
-
-
 if __name__ == "__main__":
     launch_sweep(
         algo_name="temp",
@@ -104,5 +94,4 @@ if __name__ == "__main__":
         default_count=100,
         add_cli=add_cli,
         extra_argv=lambda sa: ["--task", sa.task],
-        prep_args=prep_args,
     )

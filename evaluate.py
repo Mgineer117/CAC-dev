@@ -28,7 +28,7 @@ from utils.misc import (
     seed_all,
     setup_logger,
 )
-from utils.utils import call_env
+from utils.utils import get_env
 
 os.environ["WANDB_MODE"] = "disabled"
 
@@ -381,7 +381,7 @@ def run(args, seed, unique_id, exp_time):
     seed_all(seed)
 
     # get env
-    eval_env = call_env(args)  # always uses true dynamics
+    eval_env = get_env(args)  # always uses true dynamics
     logger, writer = setup_logger(
         args,
         unique_id,
@@ -494,9 +494,9 @@ if __name__ == "__main__":
             ci_dict[key] = margin
 
         print("=======================================")
-        print(f"{algo_name}: Mean Results: {mean_dict[f"{algo_name}/mauc_mean"]}")
+        print(f"{algo_name}: Mean Results: {mean_dict[f'{algo_name}/mauc_mean']}")
         print(
-            f"{algo_name}: 95% Confidence Intervals: {ci_dict[f"{algo_name}/mauc_mean"]}"
+            f"{algo_name}: 95% Confidence Intervals: {ci_dict[f'{algo_name}/mauc_mean']}"
         )
 
         # save mean and std dict in json

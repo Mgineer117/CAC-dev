@@ -3,7 +3,7 @@ from abc import abstractmethod
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributions import Categorical, Normal
+from torch.distributions import Normal
 
 from policy.layers.building_blocks import MLP, SirenNet
 

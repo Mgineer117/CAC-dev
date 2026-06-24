@@ -10,7 +10,6 @@ import uuid
 
 import torch
 import wandb
-from torch.utils.tensorboard import SummaryWriter
 
 from trainer.c3m_trainer import C3MTrainer
 from trainer.offpolicy_trainer import OffPolicyTrainer, OnPolicyTEMPTrainer

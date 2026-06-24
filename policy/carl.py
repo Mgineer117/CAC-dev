@@ -465,6 +465,7 @@ class CARL(Base):
         original_rewards = self.to_tensor(batch["rewards"])
         rewards, _ = self.get_rewards(states, controls)
         terminations = self.to_tensor(batch["terminations"])
+        truncations = self.to_tensor(batch["truncations"])
         old_logprobs = self.to_tensor(batch["logprobs"])
 
         # Compute advantages and returns
@@ -476,6 +477,7 @@ class CARL(Base):
                 values,
                 gamma=self.gamma,
                 gae=self.gae,
+                truncations=truncations,
                 device=self.device,
             )
 

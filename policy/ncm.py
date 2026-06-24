@@ -6,7 +6,6 @@ import torch
 import torch.nn as nn
 from torch import matmul, transpose
 from torch.optim.lr_scheduler import LambdaLR
-from tqdm import tqdm
 
 from policy.base import Base
 from policy.cvstem import CVSTEM

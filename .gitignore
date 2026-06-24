@@ -154,7 +154,6 @@ log/train_log/*
 old_main.py
 
 # Ignore all shell scripts (any .sh files)
-*.sh
 *.png
 
 # Ignore nohup output file (in any directory)

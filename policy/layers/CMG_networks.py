@@ -1,11 +1,8 @@
-import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.distributions import MultivariateNormal, Normal
+from torch.distributions import Normal
 
 from typing import Union
-from policy.base import Base
 from policy.layers.building_blocks import MLP, SirenNet
 
 

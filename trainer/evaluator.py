@@ -1,4 +1,3 @@
-import os
 import time
 from abc import abstractmethod
 
@@ -534,15 +533,18 @@ class Evaluator:
             sqrt_emp_cond = np.sqrt(emp_cond)
             if policy_name == "c3m":
                 prac_factor = sqrt_emp_cond
+                prac_label = rf"Practical: $\sqrt{{\hat\kappa}}\,e^{{-\lambda t}}$ ($\hat\kappa={emp_cond:.1f}$)"
             else:
+                # RL bounds carry the discounted-horizon 1/(1-gamma) factor.
                 prac_factor = (1.0 / max(1.0 - gamma, 1e-8)) * sqrt_emp_cond
+                prac_label = rf"Practical: $\frac{{1}}{{1-\gamma}}\sqrt{{\hat\kappa}}\,e^{{-\lambda t}}$ ($\hat\kappa={emp_cond:.1f}$)"
             ax2.plot(
                 timesteps,
                 prac_factor * np.exp(-lbd_design * timesteps),
                 linestyle=":",
                 color="darkorange",
                 linewidth=1.8,
-                label=rf"Practical: $\sqrt{{\hat\kappa}}\,e^{{-\lambda t}}$ ($\hat\kappa={emp_cond:.1f}$)",
+                label=prac_label,
             )
 
         ax2.set_xlabel("Time (s)", fontsize=16)

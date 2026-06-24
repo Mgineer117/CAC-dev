@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch import inverse, matmul, transpose
+from torch import matmul, transpose
 from torch.autograd import grad
 
 

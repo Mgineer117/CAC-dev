@@ -193,6 +193,7 @@ class CPO(Base):
                 reward_values,
                 gamma=self.gamma,
                 gae=self.gae,
+                truncations=truncations,
                 device=self.device,
             )
             cost_advantages, cost_returns = estimate_advantages(
@@ -201,6 +202,7 @@ class CPO(Base):
                 cost_values,
                 gamma=self.gamma,
                 gae=self.gae,
+                truncations=truncations,
                 device=self.device,
             )
 

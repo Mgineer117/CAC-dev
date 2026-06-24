@@ -93,13 +93,28 @@ def conjugate_gradients(Av_func, b, nsteps=10, tol=1e-8):
 
 
 def estimate_advantages(
-    rewards, terminals, values, gamma=0.99, gae=0.95, device=torch.device("cpu")
+    rewards, terminals, values, gamma=0.99, gae=0.95, truncations=None,
+    device=torch.device("cpu")
 ):
+    """GAE with separate termination / truncation handling.
+
+    A *termination* is a true terminal state: the value is not bootstrapped and
+    the GAE recursion resets. A *truncation* (e.g. time-limit) is not terminal:
+    the value is still bootstrapped, but the recursion must still reset so that
+    advantages do not bleed across the episode boundary into the next episode.
+    """
     rewards, terminals, values = (
         rewards.to(torch.device("cpu")),
         terminals.to(torch.device("cpu")),
         values.to(torch.device("cpu")),
     )
+    if truncations is None:
+        truncations = torch.zeros_like(terminals)
+    else:
+        truncations = truncations.to(torch.device("cpu"))
+    # Boundary of an episode for recursion-reset purposes: terminal OR truncated.
+    dones = torch.clamp(terminals + truncations, max=1.0)
+
     tensor_type = type(rewards)
     deltas = tensor_type(rewards.size(0), 1)
     advantages = tensor_type(rewards.size(0), 1)
@@ -107,8 +122,10 @@ def estimate_advantages(
     prev_value = 0
     prev_advantage = 0
     for i in reversed(range(rewards.size(0))):
+        # Value bootstrap is suppressed only on true terminations.
         deltas[i] = rewards[i] + gamma * prev_value * (1 - terminals[i]) - values[i]
-        advantages[i] = deltas[i] + gamma * gae * prev_advantage * (1 - terminals[i])
+        # Recursion resets on any episode boundary (termination or truncation).
+        advantages[i] = deltas[i] + gamma * gae * prev_advantage * (1 - dones[i])
 
         prev_value = values[i, 0]
         prev_advantage = advantages[i, 0]

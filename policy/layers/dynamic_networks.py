@@ -3,7 +3,7 @@ import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch import inverse, matmul, transpose
+from torch import matmul
 from torch.optim.lr_scheduler import LambdaLR
 
 from policy.base import Base

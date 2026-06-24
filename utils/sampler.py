@@ -1,6 +1,6 @@
 import time
 from datetime import date
-from math import ceil, floor
+from math import ceil
 from queue import Empty
 
 import numpy as np

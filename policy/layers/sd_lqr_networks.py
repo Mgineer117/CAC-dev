@@ -1,12 +1,10 @@
 import time
 from typing import Callable
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch import inverse, matmul, transpose
-from torch.autograd import grad
+from torch import matmul, transpose
 from torch.optim.lr_scheduler import LambdaLR
 
 from policy.layers.building_blocks import MLP

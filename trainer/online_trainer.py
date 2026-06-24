@@ -4,7 +4,6 @@ from collections import deque
 from copy import deepcopy
 
 import gymnasium as gym
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter

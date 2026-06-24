@@ -136,6 +136,7 @@ class TRPO(Base):
         controls = self.to_tensor(batch["controls"])
         rewards = self.to_tensor(batch["rewards"])
         terminations = self.to_tensor(batch["terminations"])
+        truncations = self.to_tensor(batch["truncations"])
         old_logprobs = self.to_tensor(batch["logprobs"])
 
         self.RunningMeanStd.update(rewards.clone().cpu())
@@ -151,6 +152,7 @@ class TRPO(Base):
                 values,
                 gamma=self.gamma,
                 gae=self.gae,
+                truncations=truncations,
                 device=self.device,
             )
 

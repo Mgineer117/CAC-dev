@@ -31,11 +31,23 @@ SAC_PARAMS = {
     "critic_lr": LR_LOGUNIFORM,
 }
 
+# Extra dimensions only meaningful when the optimal policy is PPO.
+PPO_PARAMS = {
+    "eps_clip": {"values": [0.1, 0.2]},
+    "k_epochs": {"values": [5, 10]},
+    "target_kl": {"min": 0.003, "max": 0.03},
+    "gae": {"min": 0.8, "max": 1.0},
+    "entropy_scaler": {"min": 1e-4, "max": 1e-1},
+    "critic_lr": LR_LOGUNIFORM,
+}
+
 
 def build_parameters(search_args):
     params = dict(SHARED_PARAMS)
     if search_args.policy == "sac":
         params.update(SAC_PARAMS)
+    elif search_args.policy == "ppo":
+        params.update(PPO_PARAMS)
     # Pin the optimal policy so the sweep stays in one parameter space.
     params["temp_optimal_policy"] = {"value": search_args.policy}
     return params
@@ -55,6 +67,17 @@ def apply_config(args, config):
         "sac_batch_size",
         "sac_utd",
         "sac_learning_starts",
+    ):
+        if key in config:
+            setattr(args, key, config[key])
+
+    # PPO knobs.
+    for key in (
+        "eps_clip",
+        "k_epochs",
+        "target_kl",
+        "gae",
+        "entropy_scaler",
     ):
         if key in config:
             setattr(args, key, config[key])

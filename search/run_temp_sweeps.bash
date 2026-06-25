@@ -8,6 +8,6 @@ ALGO="temp"
 AGENTS_PER_GPU=10
 TASKS=(cartpole segway car)
 GPUS=(0 1 2)
-EXTRA_ARGS="--policy sac"
+EXTRA_ARGS="--policy ppo"
 
 source "$(dirname "$0")/sweep_runner.sh"

@@ -397,6 +397,8 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             critic_dim=args.critic_dim,
             actor_activation=getattr(args, "actor_activation", "relu"),
             optimal_policy=args.temp_optimal_policy,
+            policy_type=getattr(args, "policy_type", "RL"),
+            anneal_stddev=getattr(args, "anneal_stddev", False),
             con_only=(algo == "temp2"),
             gamma_contracting=args.temp_gamma_contracting,
             gamma_optimal=args.temp_gamma_optimal if args.temp_gamma_optimal is not None else gamma,

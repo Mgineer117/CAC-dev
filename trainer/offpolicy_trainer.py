@@ -139,6 +139,7 @@ class OffPolicyTrainer(Evaluator):
         ) as pbar:
             while pbar.n < total_timesteps:
                 step = pbar.n + 1
+                self.policy.progress = step / total_timesteps
 
                 self.policy.train()
 
@@ -281,6 +282,7 @@ class OnPolicyTEMPTrainer(Evaluator):
             while pbar.n < total_timesteps:
                 step = pbar.n + 1
                 progress = step / total_timesteps
+                self.policy.progress = progress
 
                 self.policy.train()
 

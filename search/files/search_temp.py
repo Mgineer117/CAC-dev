@@ -11,13 +11,12 @@ from sweep_common import LR_LOGUNIFORM, launch_sweep
 SHARED_PARAMS = {
     "temp_gamma_contracting": {"values": [0.0, 0.1]},
     "temp_gamma_optimal": {"values": [0.3, 0.6, 0.9]},
-    "temp_cmg_updates_per_iter": {"values": [1, 2, 5, 10]},
-    "critic_hidden_size": {"values": [128, 256, 512]},
-    "critic_depth": {"values": [2, 3, 4]},
-    "actor_activation": {"values": ["tanh", "relu", "elu"]},
+    "temp_cmg_updates_per_iter": {"values": [1, 5, 10, 30]},
+    "critic_lr": LR_LOGUNIFORM,
     "actor_lr": LR_LOGUNIFORM,
     "W_lr": LR_LOGUNIFORM,
     "lbd": {"min": 0.01, "max": 3.0},
+    "actor_architecture": {"values": ["RL", "CL"]},
 }
 
 # Extra dimensions only meaningful when the optimal policy is SAC.
@@ -28,17 +27,16 @@ SAC_PARAMS = {
     "sac_batch_size": {"values": [64, 512]},
     "sac_utd": {"values": [1, 8]},
     "sac_learning_starts": {"values": [100, 10000]},
-    "critic_lr": LR_LOGUNIFORM,
+    "critic_hidden_size": {"values": [128, 256, 512]},
+    "critic_depth": {"values": [2, 3, 4]},
 }
 
 # Extra dimensions only meaningful when the optimal policy is PPO.
 PPO_PARAMS = {
-    "eps_clip": {"values": [0.1, 0.2]},
+    "eps_clip": {"values": [0.1, 0.2, 0.3]},
     "k_epochs": {"values": [5, 10]},
     "target_kl": {"min": 0.003, "max": 0.03},
     "gae": {"min": 0.8, "max": 1.0},
-    "entropy_scaler": {"min": 1e-4, "max": 1e-1},
-    "critic_lr": LR_LOGUNIFORM,
 }
 
 
@@ -77,10 +75,14 @@ def apply_config(args, config):
         "k_epochs",
         "target_kl",
         "gae",
-        "entropy_scaler",
     ):
         if key in config:
             setattr(args, key, config[key])
+
+    # Enforce stochasticity annealing for PPO, entropy search is meaningless
+    if args.temp_optimal_policy == "ppo":
+        args.anneal_stddev = True
+        args.entropy_scaler = 0.0
 
     # TEMP-specific.
     for key in (
@@ -88,10 +90,12 @@ def apply_config(args, config):
         "temp_gamma_contracting",
         "temp_gamma_optimal",
         "temp_cmg_updates_per_iter",
-        "actor_activation",
     ):
         if key in config:
             setattr(args, key, config[key])
+
+    if "actor_architecture" in config:
+        args.policy_type = config["actor_architecture"]
 
     # Critic architecture (uniform-width hidden layers).
     if "critic_hidden_size" in config or "critic_depth" in config:

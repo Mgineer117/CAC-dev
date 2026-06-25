@@ -118,20 +118,13 @@ class CARL(Base):
             ]
         )
 
-        self.RL_optimizer = torch.optim.Adam(
-            [
-                {"params": self.actor.parameters(), "lr": actor_lr, "name": "actor"},
-                {"params": self.critic.parameters(), "lr": critic_lr, "name": "critic"},
-            ]
-        )
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=actor_lr)
+        self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=critic_lr)
 
         self.progress = 0.0
-        self.RL_lr_scheduler = LambdaLR(
-            self.RL_optimizer, lr_lambda=self.lr_decay_lambda
-        )
-        self.W_lr_scheduler = LambdaLR(
-            self.W_optimizer, lr_lambda=self.lr_decay_lambda
-        )
+        self.actor_lr_scheduler = LambdaLR(self.actor_optimizer, lr_lambda=self.lr_decay_lambda)
+        self.critic_lr_scheduler = LambdaLR(self.critic_optimizer, lr_lambda=self.lr_decay_lambda)
+        self.W_lr_scheduler = LambdaLR(self.W_optimizer, lr_lambda=self.lr_decay_lambda)
 
         self.to(self._dtype).to(self.device)
 
@@ -391,8 +384,12 @@ class CARL(Base):
         loss_dict.update(RL_loss_dict)
         supp_dict.update(RL_supp_dict)
 
-        self.W_lr_scheduler.step()
-        self.RL_lr_scheduler.step()
+        if getattr(self, "W_lr_scheduler", None) is not None:
+            self.W_lr_scheduler.step()
+        if getattr(self, "actor_lr_scheduler", None) is not None:
+            self.actor_lr_scheduler.step()
+        if getattr(self, "critic_lr_scheduler", None) is not None:
+            self.critic_lr_scheduler.step()
 
         self.actor.anneal_stddev(progress, mode="exponential")
 
@@ -530,7 +527,8 @@ class CARL(Base):
                 losses.append(loss.item())
 
                 # Update parameters
-                self.RL_optimizer.zero_grad()
+                self.actor_optimizer.zero_grad()
+                self.critic_optimizer.zero_grad()
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=0.5)
                 grad_dict = self.compute_gradient_norm(
@@ -540,7 +538,8 @@ class CARL(Base):
                     device=self.device,
                 )
                 grad_dicts.append(grad_dict)
-                self.RL_optimizer.step()
+                self.actor_optimizer.step()
+                self.critic_optimizer.step()
 
             if kl_div.item() > self.target_kl:
                 break
@@ -552,7 +551,8 @@ class CARL(Base):
             f"{self.name}/RL_loss/actor_loss": np.mean(actor_losses),
             f"{self.name}/RL_loss/value_loss": np.mean(value_losses),
             f"{self.name}/RL_loss/entropy_loss": np.mean(entropy_losses),
-            f"{self.name}/lr/actor_lr": self.RL_optimizer.param_groups[0]["lr"],
+            f"{self.name}/lr/actor_lr": self.actor_lr_scheduler.get_last_lr()[0] if hasattr(self, "actor_lr_scheduler") else actor_lr,
+            f"{self.name}/lr/critic_lr": self.critic_lr_scheduler.get_last_lr()[0] if hasattr(self, "critic_lr_scheduler") else critic_lr,
             f"{self.name}/RL_analytics/std_dev": self.actor.logstd.exp().mean().item(),
             f"{self.name}/RL_analytics/clip_fraction": np.mean(clip_frcontrols),
             f"{self.name}/RL_analytics/kl_divergence": (

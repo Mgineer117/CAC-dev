@@ -76,6 +76,8 @@ class TEMP(Base):
         actor_activation: str = "relu",
         # which policy type to use (both contracting AND optimal share the type)
         optimal_policy: str = "sac",  # {"sac", "ppo"}
+        policy_type: str = "RL",
+        anneal_stddev: bool = False,
         # if True, only contracting policy is trained (no optimal actor)
         con_only: bool = False,
         # discount factors
@@ -160,7 +162,7 @@ class TEMP(Base):
                 state_dim, u_dim, self.con_actor, list(critic_dim),
                 gamma=gamma_contracting, tau=tau, actor_lr=actor_lr,
                 critic_lr=critic_lr, alpha_lr=alpha_lr, init_alpha=init_alpha,
-                autotune_alpha=autotune_alpha, device=device,
+                autotune_alpha=autotune_alpha, lr_decay_lambda=self.lr_decay_lambda, device=device,
             )
             if not con_only:
                 self.opt_actor = SACActor(
@@ -172,7 +174,7 @@ class TEMP(Base):
                     state_dim, u_dim, self.opt_actor, list(critic_dim),
                     gamma=gamma_optimal, tau=tau, actor_lr=actor_lr,
                     critic_lr=critic_lr, alpha_lr=alpha_lr, init_alpha=init_alpha,
-                    autotune_alpha=autotune_alpha, device=device,
+                    autotune_alpha=autotune_alpha, lr_decay_lambda=self.lr_decay_lambda, device=device,
                 )
             else:
                 self.opt_actor = None
@@ -181,10 +183,18 @@ class TEMP(Base):
             self.opt_ppo = None
 
         elif optimal_policy == "ppo":
-            self.con_actor = RLActor(
-                x_dim=x_dim, u_dim=u_dim, hidden_dim=list(actor_dim),
-                mode="stochastic", activation=actor_activation,
-            )
+            if policy_type == "CL":
+                from policy.layers.policy_networks import CLActor
+                self.con_actor = CLActor(
+                    x_dim=x_dim, u_dim=u_dim, mode="stochastic",
+                    num_windows=num_windows, anneal_stddev=anneal_stddev,
+                    hidden_dim=list(actor_dim), activation=actor_activation,
+                )
+            else:
+                self.con_actor = RLActor(
+                    x_dim=x_dim, u_dim=u_dim, hidden_dim=list(actor_dim),
+                    mode="stochastic", anneal_stddev=anneal_stddev, activation=actor_activation,
+                )
             con_critic = RLCritic(state_dim, hidden_dim=list(critic_dim))
             self.con_ppo = PPO(
                 x_dim=x_dim, u_dim=u_dim, latent_dim=x_dim,
@@ -196,10 +206,18 @@ class TEMP(Base):
                 nupdates=nupdates, device=device,
             )
             if not con_only:
-                self.opt_actor = RLActor(
-                    x_dim=x_dim, u_dim=u_dim, hidden_dim=list(actor_dim),
-                    mode="stochastic", activation=actor_activation,
-                )
+                if policy_type == "CL":
+                    from policy.layers.policy_networks import CLActor
+                    self.opt_actor = CLActor(
+                        x_dim=x_dim, u_dim=u_dim, mode="stochastic",
+                        num_windows=num_windows, anneal_stddev=anneal_stddev,
+                        hidden_dim=list(actor_dim), activation=actor_activation,
+                    )
+                else:
+                    self.opt_actor = RLActor(
+                        x_dim=x_dim, u_dim=u_dim, hidden_dim=list(actor_dim),
+                        mode="stochastic", anneal_stddev=anneal_stddev, activation=actor_activation,
+                    )
                 opt_critic = RLCritic(state_dim, hidden_dim=list(critic_dim))
                 self.opt_ppo = PPO(
                     x_dim=x_dim, u_dim=u_dim, latent_dim=x_dim,
@@ -224,6 +242,8 @@ class TEMP(Base):
 
         # CMG optimizer (pd-loss only).
         self.W_optimizer = torch.optim.Adam(self.CMG.parameters(), lr=W_lr)
+        from torch.optim.lr_scheduler import LambdaLR
+        self.W_lr_scheduler = LambdaLR(self.W_optimizer, lr_lambda=self.lr_decay_lambda)
 
         # Running EMA of the variance of the Riemannian energy (reward normaliser).
         self.reward_norm_beta = reward_norm_beta
@@ -461,6 +481,8 @@ class TEMP(Base):
         self.train()
         loss, info = self.compute_cmg_loss()
         grad_norm = self._optimize_cmg(loss)
+        if getattr(self, "W_lr_scheduler", None) is not None:
+            self.W_lr_scheduler.step()
         return {
             f"{self.name}/CMG/pd_loss": info["pd_loss"],
             f"{self.name}/CMG/pd_reg": info["pd_reg"],

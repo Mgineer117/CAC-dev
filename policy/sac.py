@@ -63,6 +63,7 @@ class SACCore(nn.Module):
         init_alpha: float = 0.2,
         autotune_alpha: bool = True,
         target_entropy: float = None,
+        lr_decay_lambda=None,
         device: str = "cpu",
     ):
         super().__init__()
@@ -85,6 +86,14 @@ class SACCore(nn.Module):
         self.critic_optimizer = torch.optim.Adam(
             list(self.q1.parameters()) + list(self.q2.parameters()), lr=critic_lr
         )
+
+        if lr_decay_lambda is not None:
+            from torch.optim.lr_scheduler import LambdaLR
+            self.actor_lr_scheduler = LambdaLR(self.actor_optimizer, lr_lambda=lr_decay_lambda)
+            self.critic_lr_scheduler = LambdaLR(self.critic_optimizer, lr_lambda=lr_decay_lambda)
+        else:
+            self.actor_lr_scheduler = None
+            self.critic_lr_scheduler = None
 
         # Entropy temperature: auto-tuned via the dual of the entropy constraint
         # E[-logπ] >= target_entropy (default -u_dim, the SAC heuristic).
@@ -170,6 +179,11 @@ class SACCore(nn.Module):
 
         self.soft_update()
 
+        if getattr(self, "actor_lr_scheduler", None) is not None:
+            self.actor_lr_scheduler.step()
+        if getattr(self, "critic_lr_scheduler", None) is not None:
+            self.critic_lr_scheduler.step()
+
         return {
             "critic_loss": critic_loss.item(),
             "actor_loss": actor_loss.item(),
@@ -232,6 +246,7 @@ class SAC(Base):
             init_alpha=init_alpha,
             autotune_alpha=autotune_alpha,
             target_entropy=target_entropy,
+            lr_decay_lambda=self.lr_decay_lambda,
             device=device,
         )
 

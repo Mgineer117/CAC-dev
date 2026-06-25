@@ -64,14 +64,11 @@ class C3M(Base):
         self.best_W_loss = float("inf")
         self.stop_W_training = False
 
-        self.optimizer = torch.optim.Adam(
-            [
-                {"params": self.CMG.parameters(), "lr": W_lr},
-                {"params": self.actor.parameters(), "lr": u_lr},
-            ]
-        )
+        self.W_optimizer = torch.optim.Adam(self.CMG.parameters(), lr=W_lr)
+        self.actor_optimizer = torch.optim.Adam(self.actor.parameters(), lr=u_lr)
 
-        self.lr_scheduler = LambdaLR(self.optimizer, lr_lambda=self.lr_decay_lambda)
+        self.W_lr_scheduler = LambdaLR(self.W_optimizer, lr_lambda=self.lr_decay_lambda)
+        self.actor_lr_scheduler = LambdaLR(self.actor_optimizer, lr_lambda=self.lr_decay_lambda)
 
         self.num_updates = 0
         self.dummy = torch.tensor(1e-5)
@@ -150,14 +147,16 @@ class C3M(Base):
         return loss, {"pd_loss": pd_loss, "overshoot_loss": overshoot_loss}
 
     def optimize_params(self, loss: torch.Tensor):
-        self.optimizer.zero_grad()
+        self.W_optimizer.zero_grad()
+        self.actor_optimizer.zero_grad()
         loss.backward()
 
         if any(
             p.grad is not None and not torch.isfinite(p.grad).all()
             for p in self.parameters()
         ):
-            self.optimizer.zero_grad()
+            self.W_optimizer.zero_grad()
+            self.actor_optimizer.zero_grad()
             return {}
 
         torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
@@ -167,8 +166,13 @@ class C3M(Base):
             dir="C3M",
             device=self.device,
         )
-        self.optimizer.step()
-        self.lr_scheduler.step()
+        self.W_optimizer.step()
+        self.actor_optimizer.step()
+        
+        if getattr(self, "W_lr_scheduler", None) is not None:
+            self.W_lr_scheduler.step()
+        if getattr(self, "actor_lr_scheduler", None) is not None:
+            self.actor_lr_scheduler.step()
 
         return grad_dict
 
@@ -190,8 +194,8 @@ class C3M(Base):
             f"{self.name}/loss/loss": loss.item(),
             f"{self.name}/loss/pd_loss": infos["pd_loss"].item(),
             f"{self.name}/loss/overshoot_loss": infos["overshoot_loss"].item(),
-            f"{self.name}/lr/W_lr": self.lr_scheduler.get_last_lr()[0],
-            f"{self.name}/lr/u_lr": self.lr_scheduler.get_last_lr()[1],
+            f"{self.name}/lr/W_lr": self.W_lr_scheduler.get_last_lr()[0] if hasattr(self, "W_lr_scheduler") else 3e-4,
+            f"{self.name}/lr/u_lr": self.actor_lr_scheduler.get_last_lr()[0] if hasattr(self, "actor_lr_scheduler") else 1e-4,
         }
         loss_dict.update(grad_dict)
 

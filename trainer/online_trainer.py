@@ -94,6 +94,14 @@ class OnlineTrainer(Evaluator):
                 n_updates = int(loss_dict.get(
                     f"{self.policy.name}/RL_analytics/n_updates", n_steps
                 ))
+
+                # Warmup (off-policy buffer not yet filled): no policy update
+                # happened, so don't count it as a training step or run eval —
+                # just surface a single wandb logging tick and keep collecting.
+                if n_updates == 0:
+                    self.write_log(loss_dict, step=step)
+                    continue
+
                 pbar.update(n_updates)
 
                 loss_dict[f"{self.policy.name}/RL_analytics/timesteps"] = step

@@ -137,7 +137,7 @@ class PolyEnv(BaseEnv):
     """
 
     task = "poly"
-    angle_idx = []
+    angle_idx = [] 
 
     def __init__(
         self,

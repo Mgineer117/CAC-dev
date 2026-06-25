@@ -119,6 +119,19 @@ class OffPolicyTrainer(Evaluator):
         sac_updates_total = 0
         loss_agg = {}
 
+        # --- warmup: fill the replay buffer before any policy update ---
+        # No step counting or per-step logging happens before the first update;
+        # the whole warmup collection is surfaced as a single wandb logging tick.
+        self.policy.train()
+        while self.buffer.size < self.learning_starts:
+            next_obs, done, _ = self._step_env(obs)
+            obs = self.env.reset(seed=self.seed)[0] if done else next_obs
+        if self.learning_starts > 0:
+            self.write_log(
+                {f"{self.policy.name}/RL_analytics/buffer_size": self.buffer.size},
+                step=self.init_epochs,
+            )
+
         with tqdm(
             initial=self.init_epochs,
             total=total_timesteps,
@@ -138,22 +151,20 @@ class OffPolicyTrainer(Evaluator):
                     f"{self.policy.name}/RL_analytics/avg_env_reward": env_rew,
                 }
 
-                # --- off-policy updates ---
-                n_updates = 0
-                if self.buffer.size >= self.learning_starts:
-                    n_updates = max(1, int(self.utd_ratio))
-                    for _ in range(n_updates):
-                        s, c, ns, _, term_t = self.buffer.sample()
-                        info = self.policy.update_sac(s, c, ns, term_t)
-                        for k, v in info.items():
-                            loss_agg.setdefault(k, []).append(v)
-                        sac_updates_total += 1
+                # --- off-policy updates (buffer is already warm) ---
+                n_updates = max(1, int(self.utd_ratio))
+                for _ in range(n_updates):
+                    s, c, ns, _, term_t = self.buffer.sample()
+                    info = self.policy.update_sac(s, c, ns, term_t)
+                    for k, v in info.items():
+                        loss_agg.setdefault(k, []).append(v)
+                    sac_updates_total += 1
 
-                        if sac_updates_total % self.cmg_update_freq == 0:
-                            for _ in range(self.cmg_updates_per_iter):
-                                cmg_info = self.policy.update_cmg()
-                                for k, v in cmg_info.items():
-                                    loss_agg.setdefault(k, []).append(v)
+                    if sac_updates_total % self.cmg_update_freq == 0:
+                        for _ in range(self.cmg_updates_per_iter):
+                            cmg_info = self.policy.update_cmg()
+                            for k, v in cmg_info.items():
+                                loss_agg.setdefault(k, []).append(v)
 
                 loss_dict[f"{self.policy.name}/RL_analytics/n_updates"] = n_updates
 
@@ -163,7 +174,7 @@ class OffPolicyTrainer(Evaluator):
                         loss_dict[k] = float(np.mean(vs))
                     loss_agg = {}
 
-                pbar.update(n_updates or 1)
+                pbar.update(n_updates)
 
                 self.write_log(loss_dict, step=step)
 

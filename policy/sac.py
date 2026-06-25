@@ -292,7 +292,13 @@ class SAC(Base):
         n_new = batch["states"].shape[0]
 
         if self.buffer.size < self.learning_starts:
-            loss_dict = {f"{self.name}/RL_analytics/buffer_size": self.buffer.size}
+            # Warmup: fill the buffer without a policy update. Report zero updates
+            # so the trainer neither counts nor logs this as a training step; the
+            # whole warmup collapses into a single wandb logging tick.
+            loss_dict = {
+                f"{self.name}/RL_analytics/buffer_size": self.buffer.size,
+                f"{self.name}/RL_analytics/n_updates": 0,
+            }
             self.eval()
             return loss_dict, {}, time.time() - t0
 

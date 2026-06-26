@@ -49,7 +49,6 @@ class NCM(Base):
         minibatch_size: int = 256,
         cvstem_num_samples: int = 100,
         nupdates: int = 30000,
-        num_windows: int = 1,
         device: str = "cpu",
         logger=None,
         writer=None,
@@ -60,7 +59,6 @@ class NCM(Base):
         self.device = device
         self.x_dim = x_dim
         self.u_dim = u_dim
-        self.num_windows = num_windows
 
         self.num_minibatch = num_minibatch
         self.minibatch_size = minibatch_size
@@ -165,11 +163,7 @@ class NCM(Base):
     def trim_state(self, state: torch.Tensor):
         x = state[:, : self.x_dim]
         xref = state[:, self.x_dim : 2 * self.x_dim]
-        uref = state[
-            :,
-            (1 + self.num_windows) * self.x_dim : (1 + self.num_windows) * self.x_dim
-            + self.u_dim,
-        ]
+        uref = state[:, 2 * self.x_dim : 2 * self.x_dim + self.u_dim]
         return x, xref, uref
 
     def forward(self, state: np.ndarray):

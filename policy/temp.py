@@ -111,7 +111,6 @@ class TEMP(Base):
         entropy_scaler: float = 1e-3,
         num_minibatch: int = 4,
         minibatch_size: int = 1024,
-        num_windows: int = 1,
         nupdates: int = 1,
         device: str = "cpu",
     ):
@@ -123,7 +122,6 @@ class TEMP(Base):
         self.x_dim = x_dim
         self.u_dim = u_dim
         self.state_dim = state_dim
-        self.num_windows = num_windows
 
         self.get_f_and_B = get_f_and_B
         if isinstance(self.get_f_and_B, nn.Module):
@@ -156,7 +154,7 @@ class TEMP(Base):
             self.con_actor = SACActor(
                 x_dim, u_dim, state_dim, list(actor_dim),
                 action_scale=action_scale, action_bias=action_bias,
-                num_windows=num_windows, activation=actor_activation,
+                activation=actor_activation,
             )
             self.con_core = SACCore(
                 state_dim, u_dim, self.con_actor, list(critic_dim),
@@ -168,7 +166,7 @@ class TEMP(Base):
                 self.opt_actor = SACActor(
                     x_dim, u_dim, state_dim, list(actor_dim),
                     action_scale=action_scale, action_bias=action_bias,
-                    num_windows=num_windows, activation=actor_activation,
+                    activation=actor_activation,
                 )
                 self.opt_core = SACCore(
                     state_dim, u_dim, self.opt_actor, list(critic_dim),
@@ -187,7 +185,7 @@ class TEMP(Base):
                 from policy.layers.policy_networks import CLActor
                 self.con_actor = CLActor(
                     x_dim=x_dim, u_dim=u_dim, mode="stochastic",
-                    num_windows=num_windows, anneal_stddev=anneal_stddev,
+                    anneal_stddev=anneal_stddev,
                     hidden_dim=list(actor_dim), activation=actor_activation,
                 )
             else:
@@ -198,7 +196,7 @@ class TEMP(Base):
             con_critic = RLCritic(state_dim, hidden_dim=list(critic_dim))
             self.con_ppo = PPO(
                 x_dim=x_dim, u_dim=u_dim, latent_dim=x_dim,
-                num_windows=num_windows, actor=self.con_actor, critic=con_critic,
+                actor=self.con_actor, critic=con_critic,
                 actor_lr=actor_lr, critic_lr=critic_lr,
                 num_minibatch=num_minibatch, minibatch_size=minibatch_size,
                 eps_clip=eps_clip, entropy_scaler=entropy_scaler,
@@ -210,7 +208,7 @@ class TEMP(Base):
                     from policy.layers.policy_networks import CLActor
                     self.opt_actor = CLActor(
                         x_dim=x_dim, u_dim=u_dim, mode="stochastic",
-                        num_windows=num_windows, anneal_stddev=anneal_stddev,
+                        anneal_stddev=anneal_stddev,
                         hidden_dim=list(actor_dim), activation=actor_activation,
                     )
                 else:
@@ -221,7 +219,7 @@ class TEMP(Base):
                 opt_critic = RLCritic(state_dim, hidden_dim=list(critic_dim))
                 self.opt_ppo = PPO(
                     x_dim=x_dim, u_dim=u_dim, latent_dim=x_dim,
-                    num_windows=num_windows, actor=self.opt_actor, critic=opt_critic,
+                    actor=self.opt_actor, critic=opt_critic,
                     actor_lr=actor_lr, critic_lr=critic_lr,
                     num_minibatch=num_minibatch, minibatch_size=minibatch_size,
                     eps_clip=eps_clip, entropy_scaler=entropy_scaler,

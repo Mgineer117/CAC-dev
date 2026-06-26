@@ -52,14 +52,12 @@ class SACActor(BaseActor):
         hidden_dim: list,
         action_scale=1.0,
         action_bias=0.0,
-        num_windows: int = 1,
         activation=nn.ReLU(),
     ):
         super().__init__()
         self.x_dim = x_dim
         self.u_dim = u_dim
         self.state_dim = state_dim
-        self.num_windows = num_windows
         # SAC samples a squashed Gaussian; "mode" is kept for interface parity but
         # the actor is always stochastic at collection time.
         self.mode = "stochastic"

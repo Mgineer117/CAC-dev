@@ -64,7 +64,6 @@ class TurtlebotEnv(BaseEnv):
         self,
         sample_mode: str = "uniform",
         reward_mode: str = "default",
-        num_windows: int = 1,
     ) -> None:
         """
         State: tracking error between current and reference trajectory
@@ -77,7 +76,6 @@ class TurtlebotEnv(BaseEnv):
         # initialize the base environment
         env_config["sample_mode"] = sample_mode
         env_config["reward_mode"] = reward_mode
-        env_config["num_windows"] = num_windows
 
         super(TurtlebotEnv, self).__init__(env_config)
 

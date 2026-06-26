@@ -1,7 +1,6 @@
 {
     "cmg_mode": "deterministic",
     "cmg_activation": "relu",
-    "num_windows": 1,
     "cartpole_lbd": 0.5,
     "flapper_lbd": 0.5,
     "car_lbd": 0.5,

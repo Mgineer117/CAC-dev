@@ -4,6 +4,7 @@ from sweep_common import LR_LOGUNIFORM, apply_cmg_rl_config, launch_sweep
 
 PARAMETERS = {
     "lbd": {"min": 0.01, "max": 1.0},
+    "eps": {"min": 1e-3, "max": 1.0, "distribution": "log_uniform_values"},
     "actor_lr": LR_LOGUNIFORM,
     "critic_lr": LR_LOGUNIFORM,
     "W_lr": LR_LOGUNIFORM,

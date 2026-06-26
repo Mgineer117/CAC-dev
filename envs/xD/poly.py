@@ -61,7 +61,6 @@ _BASE_CONFIG = dict(
     dt=DT, time_bound=5.0,
     q=1.0, r=0.0,
     sample_mode="Uniform", reward_mode="default",
-    num_windows=1,
 )
 
 
@@ -143,12 +142,10 @@ class PolyEnv(BaseEnv):
         self,
         sample_mode: str = "Uniform",
         reward_mode: str = "default",
-        num_windows: int = 1,
     ):
         cfg = {**_BASE_CONFIG,
                "sample_mode": sample_mode,
-               "reward_mode": reward_mode,
-               "num_windows": num_windows}
+               "reward_mode": reward_mode}
         super().__init__(cfg)
         self.K_lin, self.M_lin = compute_linearised_metric()
 

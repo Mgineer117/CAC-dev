@@ -1,7 +1,6 @@
 {
     "policy_mode": "deterministic",
     "cmg_mode": "deterministic",
-    "num_windows": 1,
     "cartpole_lbd": 0.5,
     "flapper_lbd": 0.5,
     "car_lbd": 0.5,

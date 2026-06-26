@@ -29,9 +29,7 @@ from main import run  # noqa: E402
 from utils.get_args import get_args  # noqa: E402
 
 # Shared CMG / contraction sweep dimensions reused across the CMG-RL launchers.
-LR_LOGUNIFORM = {"min": 1e-5, "max": 1e-3, "distribution": "log_uniform_values"}
-W_BOUND_LB = {"min": 0.01, "max": 1.0, "distribution": "log_uniform_values"}
-W_BOUND_UB = {"min": 10.0, "max": 1000.0, "distribution": "log_uniform_values"}
+LR_LOGUNIFORM = {"min": 1e-6, "max": 1e-2, "distribution": "log_uniform_values"}
 
 
 def apply_cmg_rl_config(args, config):
@@ -42,6 +40,7 @@ def apply_cmg_rl_config(args, config):
     """
     for key in (
         "lbd",
+        "eps",
         "w_lb",
         "w_ub",
         "actor_lr",

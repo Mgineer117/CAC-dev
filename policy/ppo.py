@@ -20,7 +20,6 @@ class PPO(Base):
         x_dim: int,
         u_dim: int,
         latent_dim: int,
-        num_windows: int,
         actor: nn.Module,
         critic: nn.Module,
         actor_lr: float = 3e-4,

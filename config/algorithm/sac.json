@@ -1,5 +1,4 @@
 {
-    "num_windows": 1,
     "policy_type": "RL",
     "policy_mode": "stochastic",
     "anneal_stddev": false,

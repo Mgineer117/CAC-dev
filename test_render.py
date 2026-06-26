@@ -11,7 +11,6 @@ args = Args()
 args.task = "car"
 args.sample_mode = "uniform"
 args.reward_mode = "default"
-args.num_windows = 1
 
 env = get_env(args)
 obs, info = env.reset()

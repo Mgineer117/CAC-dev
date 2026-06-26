@@ -1,9 +1,0 @@
-matplotlib
-numpy
-gymnasium
-pandas
-torch
-wandb[media]
-tensorboard
-scipy
-tqdm

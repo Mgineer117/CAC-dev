@@ -49,13 +49,6 @@ class BaseEnv(gym.Env):
         self.episode_len = int(self.time_bound / self.dt)
         self.t = np.arange(0, self.time_bound, self.dt)
 
-        # state window
-        assert env_config["num_windows"] > 0, "num_windows must be positive."
-        if env_config["num_windows"] > self.max_episode_len:
-            self.num_windows = self.max_episode_len
-        else:
-            self.num_windows = env_config["num_windows"]
-
         # dynamics parameters
         self.tracking_scaler = env_config["q"]
         self.control_scaler = env_config["r"]
@@ -69,12 +62,8 @@ class BaseEnv(gym.Env):
         ref_unit_min = np.concatenate((self.X_MIN.flatten(), self.UREF_MIN.flatten()))
         ref_unit_max = np.concatenate((self.X_MAX.flatten(), self.UREF_MAX.flatten()))
 
-        self.STATE_MIN = np.concatenate(
-            (self.X_MIN.flatten(), np.tile(ref_unit_min, self.num_windows))
-        )
-        self.STATE_MAX = np.concatenate(
-            (self.X_MAX.flatten(), np.tile(ref_unit_max, self.num_windows))
-        )
+        self.STATE_MIN = np.concatenate((self.X_MIN.flatten(), ref_unit_min))
+        self.STATE_MAX = np.concatenate((self.X_MAX.flatten(), ref_unit_max))
 
         # gymnasium spaces
         self.observation_space = spaces.Box(
@@ -231,25 +220,12 @@ class BaseEnv(gym.Env):
         return x_copy
 
     def construct_state(self, x: np.ndarray):
-        # 1. Define the slice window normally
-        start = self.time_steps
-        end = min(self.time_steps + self.num_windows, self.episode_len)
+        # Reference at the current step (clamped to the last available step).
+        idx = min(self.time_steps, self.episode_len - 1)
+        xref = self.xref[idx]
+        uref = self.uref[idx]
 
-        # 2. Get the available real data
-        # (If we are at the end, this will just be shorter than normal)
-        x_window = self.xref[start:end]
-        u_window = self.uref[start:end]
-
-        # 3. Calculate how much is missing
-        pad_len = self.num_windows - len(x_window)
-
-        # 4. Pad if necessary (automatic "if/else" inside numpy)
-        if pad_len > 0:
-            # Pad the first dimension (rows) with the edge value
-            x_window = np.pad(x_window, ((0, pad_len), (0, 0)), mode="edge")
-            u_window = np.pad(u_window, ((0, pad_len), (0, 0)), mode="edge")
-
-        return np.concatenate([x, x_window.flatten(), u_window.flatten()])
+        return np.concatenate([x, xref.flatten(), uref.flatten()])
 
     def replace_dynamics(self, dynamics_model: nn.Module):
         print("[INFO] The environment is now using learned dynamics for transition.")

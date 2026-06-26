@@ -30,6 +30,7 @@ class C3M(Base):
         num_minibatch: int = 8,
         minibatch_size: int = 256,
         nupdates: int = 1,
+        cmg_updates_per_policy_update: int = 1,
         device: str = "cpu",
     ):
         super(C3M, self).__init__()
@@ -44,6 +45,8 @@ class C3M(Base):
         self.minibatch_size = minibatch_size
 
         self.nupdates = nupdates
+        # How many contraction-metric (CMG) updates to take per controller update.
+        self.cmg_updates_per_policy_update = max(1, int(cmg_updates_per_policy_update))
 
         self.CMG = CMG
         self.actor = actor
@@ -146,34 +149,33 @@ class C3M(Base):
 
         return loss, {"pd_loss": pd_loss, "overshoot_loss": overshoot_loss}
 
-    def optimize_params(self, loss: torch.Tensor):
+    def optimize_params(self, loss: torch.Tensor, optimizer, module, name: str):
+        """Take a single optimization step on ``module`` using ``optimizer``.
+
+        Gradients are computed for the whole graph (the contraction loss couples
+        the metric and the controller), but only ``optimizer`` is stepped, so the
+        other component is held fixed for this update.
+        """
         self.W_optimizer.zero_grad()
         self.actor_optimizer.zero_grad()
         loss.backward()
 
         if any(
             p.grad is not None and not torch.isfinite(p.grad).all()
-            for p in self.parameters()
+            for p in module.parameters()
         ):
             self.W_optimizer.zero_grad()
             self.actor_optimizer.zero_grad()
             return {}
 
-        torch.nn.utils.clip_grad_norm_(self.parameters(), max_norm=1.0)
+        torch.nn.utils.clip_grad_norm_(module.parameters(), max_norm=1.0)
         grad_dict = self.compute_gradient_norm(
-            [self.CMG, self.actor, self.lbd],
-            ["CMG", "actor", "lbd"],
+            [module],
+            [name],
             dir="C3M",
             device=self.device,
         )
-        self.W_optimizer.step()
-        self.actor_optimizer.step()
-        
-        if getattr(self, "W_lr_scheduler", None) is not None:
-            self.W_lr_scheduler.step()
-        if getattr(self, "actor_lr_scheduler", None) is not None:
-            self.actor_lr_scheduler.step()
-
+        optimizer.step()
         return grad_dict
 
     def learn(self):
@@ -182,8 +184,24 @@ class C3M(Base):
 
         self.progress = min(1.0, self.num_updates / max(1, self.nupdates))
 
+        # Several CMG (metric) updates with the controller held fixed, ...
+        grad_dict = {}
+        for _ in range(self.cmg_updates_per_policy_update):
+            loss, infos = self.compute_loss()
+            grad_dict.update(
+                self.optimize_params(loss, self.W_optimizer, self.CMG, "CMG")
+            )
+
+        # ... then one controller (policy) update with the metric held fixed.
         loss, infos = self.compute_loss()
-        grad_dict = self.optimize_params(loss)
+        grad_dict.update(
+            self.optimize_params(loss, self.actor_optimizer, self.actor, "actor")
+        )
+
+        if getattr(self, "W_lr_scheduler", None) is not None:
+            self.W_lr_scheduler.step()
+        if getattr(self, "actor_lr_scheduler", None) is not None:
+            self.actor_lr_scheduler.step()
 
         supp_dict = {}
         if self.num_updates % 500 == 0:

@@ -15,7 +15,6 @@ from tqdm import tqdm
 
 from policy.base import Base
 from policy.layers.CMG_networks import CCM_Generator
-from policy.layers.policy_networks import EncoderCLActor, EncoderRLCritic
 from utils.functions import (
     compute_kl,
     conjugate_gradients,
@@ -64,8 +63,8 @@ class CPO(Base):
         u_dim: int,
         dt: float,
         data: dict,
-        actor: EncoderCLActor,
-        critic: EncoderRLCritic,
+        actor: nn.Module,
+        critic: nn.Module,
         critic_lr: float = 5e-4,
         num_minibatch: int = 8,
         minibatch_size: int = 256,
@@ -80,7 +79,6 @@ class CPO(Base):
         backtrack_coeff: float = 0.8,
         target_kl: float = 0.03,
         # RL parameters
-        num_windows: int = 1,
         gamma: float = 0.99,
         gae: float = 0.95,
         l2_reg: float = 1e-8,
@@ -110,7 +108,6 @@ class CPO(Base):
         self.reward_mode = reward_mode
         self.tracking_scaler = tracking_scaler
         self.control_scaler = control_scaler
-        self.num_windows = num_windows
         self.gamma, self.gae, self.l2_reg = gamma, gae, l2_reg
         self.cost_limit, self.target_kl = 1000, target_kl
         self.nupdates = nupdates

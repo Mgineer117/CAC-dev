@@ -16,8 +16,6 @@ from policy.cpo import CPO
 from policy.layers.CMG_networks_bounded import BoundedCCM_Generator
 from policy.layers.policy_networks import (
     CLActor,
-    EncoderCLActor,
-    EncoderRLCritic,
     RLActor,
     RLCritic,
 )
@@ -46,7 +44,6 @@ def get_env(args):
     env = env_map[args.task](
         sample_mode=args.sample_mode,
         reward_mode=args.reward_mode,
-        num_windows=args.num_windows,
     )
     env.lbd = args.lbd
     env.gamma = args.gamma
@@ -70,7 +67,6 @@ def _create_actor_critic(args):
         actor = CLActor(
             x_dim=args.x_dim,
             u_dim=args.u_dim,
-            num_windows=args.num_windows,
             mode=args.policy_mode,
             anneal_stddev=args.anneal_stddev,
             hidden_dim=args.actor_dim,
@@ -87,22 +83,6 @@ def _create_actor_critic(args):
             activation=actor_activation,
         )
         critic = RLCritic(args.state_dim, hidden_dim=args.critic_dim)
-    elif args.policy_type == "EncoderCL":
-        actor = EncoderCLActor(
-            x_dim=args.x_dim,
-            u_dim=args.u_dim,
-            latent_dim=args.x_dim,
-            num_windows=args.num_windows,
-            mode=args.policy_mode,
-            anneal_stddev=args.anneal_stddev,
-        )
-        critic = EncoderRLCritic(
-            x_dim=args.x_dim,
-            u_dim=args.u_dim,
-            latent_dim=args.x_dim,
-            num_windows=args.num_windows,
-            hidden_dim=args.critic_dim,
-        )
     else:
         raise ValueError(f"Unknown policy_type: {args.policy_type}")
     return actor, critic
@@ -168,7 +148,6 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             x_dim=args.x_dim,
             u_dim=args.u_dim,
             latent_dim=args.x_dim,
-            num_windows=args.num_windows,
             actor=actor,
             critic=critic,
             actor_lr=args.actor_lr,
@@ -190,7 +169,6 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             x_dim=args.x_dim,
             u_dim=args.u_dim,
             latent_dim=args.x_dim,
-            num_windows=args.num_windows,
             actor=actor,
             critic=critic,
             critic_lr=args.critic_lr,
@@ -206,14 +184,26 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
     # --- 3. C3M Family ---
     elif algo == "c3m":
         CMG = _create_cmg(args, mode="deterministic", device=args.device)
-        # C3M uses a specific deterministic actor
-        actor = CLActor(
-            x_dim=args.x_dim,
-            u_dim=args.u_dim,
-            mode="deterministic",
-            hidden_dim=args.actor_dim,
-            activation=getattr(args, "actor_activation", "tanh"),
-        )
+        # C3M uses a deterministic actor; the architecture is selectable via
+        # policy_type (defaults to CL to preserve the original behavior).
+        actor_activation = getattr(args, "actor_activation", "tanh")
+        actor_arch = getattr(args, "policy_type", None) or "CL"
+        if actor_arch == "RL":
+            actor = RLActor(
+                x_dim=args.x_dim,
+                u_dim=args.u_dim,
+                hidden_dim=args.actor_dim,
+                mode="deterministic",
+                activation=actor_activation,
+            )
+        else:
+            actor = CLActor(
+                x_dim=args.x_dim,
+                u_dim=args.u_dim,
+                mode="deterministic",
+                hidden_dim=args.actor_dim,
+                activation=actor_activation,
+            )
         data = env.get_rollout(args.c3m_buffer_size, mode="c3m")
 
         return C3M(
@@ -232,6 +222,7 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             num_minibatch=args.num_minibatch,
             minibatch_size=args.minibatch_size,
             nupdates=args.epochs,
+            cmg_updates_per_policy_update=args.cmg_updates_per_policy_update,
             device=args.device,
         )
 
@@ -265,7 +256,6 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             tracking_scaler=env.tracking_scaler,
             control_scaler=env.control_scaler,
             target_kl=args.target_kl,
-            num_windows=args.num_windows,
             gamma=gamma,
             gae=args.gae,
             K=args.k_epochs,
@@ -305,7 +295,6 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             tracking_scaler=env.tracking_scaler,
             control_scaler=env.control_scaler,
             target_kl=args.target_kl,
-            num_windows=args.num_windows,
             gamma=gamma,
             gae=args.gae,
             K=args.k_epochs,
@@ -338,7 +327,6 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             minibatch_size=args.minibatch_size,
             cvstem_num_samples=args.cvstem_num_samples,
             nupdates=args.epochs,
-            num_windows=args.num_windows,
             device=args.device,
             logger=logger,
             writer=writer,
@@ -353,7 +341,6 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             hidden_dim=args.actor_dim,
             action_scale=scale,
             action_bias=bias,
-            num_windows=args.num_windows,
             activation=getattr(args, "actor_activation", "relu"),
         )
         return SAC(
@@ -373,7 +360,6 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             sac_batch_size=args.sac_batch_size,
             utd_ratio=args.sac_utd,
             learning_starts=args.sac_learning_starts,
-            num_windows=args.num_windows,
             nupdates=nupdates,
             device=args.device,
         )
@@ -425,7 +411,6 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             entropy_scaler=args.entropy_scaler,
             num_minibatch=args.num_minibatch,
             minibatch_size=args.minibatch_size,
-            num_windows=args.num_windows,
             nupdates=nupdates,
             device=args.device,
         )
@@ -452,7 +437,6 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             tracking_scaler=env.tracking_scaler,
             control_scaler=env.control_scaler,
             target_kl=args.target_kl,
-            num_windows=args.num_windows,
             gamma=gamma,
             gae=args.gae,
             nupdates=nupdates,

@@ -48,7 +48,6 @@ class CARL(Base):
         K: int = 5,
         entropy_scaler: float = 1e-3,
         # RL parameters
-        num_windows: int = 1,
         gamma: float = 0.99,
         gae: float = 0.95,
         l2_reg: float = 1e-8,
@@ -67,7 +66,6 @@ class CARL(Base):
 
         self.x_dim = x_dim
         self.u_dim = u_dim
-        self.num_windows = num_windows
 
         self.data = data
         self.num_minibatch = num_minibatch

@@ -216,7 +216,6 @@ class SAC(Base):
         sac_batch_size: int = 256,
         utd_ratio: float = 1.0,
         learning_starts: int = 5000,
-        num_windows: int = 1,
         nupdates: int = 1,
         device: str = "cpu",
     ):
@@ -226,7 +225,6 @@ class SAC(Base):
         self.x_dim = x_dim
         self.u_dim = u_dim
         self.state_dim = state_dim
-        self.num_windows = num_windows
         self.gamma = gamma
         self.sac_batch_size = sac_batch_size
         self.utd_ratio = utd_ratio

@@ -1,7 +1,6 @@
 {
     "policy_mode": "stochastic",
     "anneal_stddev": false,
-    "num_windows": 1,
     "policy_type": "CL",
     "reward_mode": "default"
 }

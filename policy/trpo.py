@@ -52,7 +52,6 @@ class TRPO(Base):
         x_dim: int,
         u_dim: int,
         latent_dim: int,
-        num_windows: int,
         actor: nn.Module,
         critic: nn.Module,
         critic_lr: float = 5e-4,

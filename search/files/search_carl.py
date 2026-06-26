@@ -2,16 +2,14 @@
 
 from sweep_common import (
     LR_LOGUNIFORM,
-    W_BOUND_LB,
-    W_BOUND_UB,
     apply_cmg_rl_config,
     launch_sweep,
 )
 
 PARAMETERS = {
     "lbd": {"min": 0.01, "max": 1.0},
-    "w_lb": W_BOUND_LB,
-    "w_ub": W_BOUND_UB,
+    "w_lb": {"min": 0.01, "max": 1.0, "distribution": "log_uniform_values"},
+    "w_ub": {"min": 10.0, "max": 1000.0, "distribution": "log_uniform_values"},
     "actor_lr": LR_LOGUNIFORM,
     "critic_lr": LR_LOGUNIFORM,
     "W_lr": LR_LOGUNIFORM,

@@ -1,9 +1,8 @@
 {
     "policy_mode": "stochastic",
-    "anneal_stddev": false,
+    "anneal_stddev": true,
     "cmg_mode": "stochastic",
     "W_entropy_scaler": 0.001,
-    "num_windows": 1,
     "policy_type": "CL",
     "reward_mode": "inverse",
     "cartpole_lbd": 0.5,

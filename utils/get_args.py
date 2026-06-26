@@ -24,10 +24,11 @@ def get_args():
 
     # --- policy ---
     p.add_argument("--policy-mode", type=str, default=None, help='["deterministic", "stochastic"].')
-    p.add_argument("--policy-type", type=str, default=None, help='["EncoderCL", "CL", "RL"].')
+    p.add_argument("--policy-type", type=str, default=None, help='["CL", "RL"].')
     p.add_argument("--cmg-mode", type=str, default=None, help='CMG mode: ["deterministic", "stochastic"].')
     p.add_argument("--disable-cmg-training", action="store_true", help="Disable CMG training.")
     p.add_argument("--policy-updates-per-cmg-update", type=int, default=5)
+    p.add_argument("--cmg-updates-per-policy-update", type=int, default=1, help="C3M: CMG updates per controller update.")
 
     # --- learning rates ---
     p.add_argument("--actor-lr", type=float, default=3e-4)
@@ -38,8 +39,8 @@ def get_args():
     p.add_argument("--u-lr", type=float, default=None, help="C3M actor LR.")
 
     # --- contraction ---
-    p.add_argument("--w-ub", type=float, default=None, help="Contraction metric upper bound.")
-    p.add_argument("--w-lb", type=float, default=None, help="Contraction metric lower bound.")
+    p.add_argument("--w-ub", type=float, default=10.0, help="Contraction metric upper bound.")
+    p.add_argument("--w-lb", type=float, default=0.1, help="Contraction metric lower bound.")
     p.add_argument("--lbd", type=float, default=0.5, help="Desired contraction rate.")
     p.add_argument("--eps", type=float, default=0.1, help="CMG regularization.")
 
@@ -93,7 +94,6 @@ def get_args():
     p.add_argument("--dynamics-epochs", type=int, default=20000)
     p.add_argument("--sdc-epochs", type=int, default=2000)
     p.add_argument("--timesteps", type=int, default=None)
-    p.add_argument("--num-windows", type=int, default=None)
     p.add_argument("--log-interval", type=int, default=100)
     p.add_argument("--eval-episodes", type=int, default=10)
     p.add_argument("--eval-num", type=int, default=10, help="Reference trajectories for evaluation.")

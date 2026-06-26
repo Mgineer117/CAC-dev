@@ -118,7 +118,7 @@ if __name__ == "__main__":
         parameters=build_parameters,
         apply_config=apply_config,
         default_project="TEMP-SWEEP",
-        default_count=100,
+        default_count=20,
         add_cli=add_cli,
         extra_argv=lambda sa: ["--task", sa.task],
     )

@@ -23,5 +23,5 @@ if __name__ == "__main__":
         parameters=PARAMETERS,
         apply_config=apply_cmg_rl_config,
         default_project="CARL-SWEEP",
-        default_count=5,
+        default_count=20,
     )

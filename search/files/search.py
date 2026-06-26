@@ -28,6 +28,6 @@ if __name__ == "__main__":
         parameters=PARAMETERS,
         apply_config=apply_config,
         default_project="AEOS-SWEEP",
-        default_count=100,
+        default_count=20,
         metric="max_eval_return",
     )

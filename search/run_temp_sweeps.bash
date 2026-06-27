@@ -16,7 +16,7 @@
 SCRIPT="search/files/search_temp.py"
 PROJECT_PREFIX="TEMP-SWEEP"
 ALGO="temp"
-AGENTS_PER_GPU=10
+AGENTS_PER_GPU=5
 TASKS=(cartpole) #  segway car)
 GPUS=(0)
 EXTRA_ARGS="--policy ppo"

@@ -359,12 +359,12 @@ class RLActor(BaseActor):
 
 class RLCritic(nn.Module):
 
-    def __init__(self, input_dim: int, hidden_dim: list):
+    def __init__(self, input_dim: int, hidden_dim: list, activation="tanh"):
         super().__init__()
 
         # Initialize the model: MLP that outputs the value function (1 output)
         self.model = MLP(
-            input_dim, hidden_dim, 1, activation=nn.Tanh(), initialization="critic"
+            input_dim, hidden_dim, 1, activation=get_activation(activation), initialization="critic"
         )
 
     def forward(self, state: torch.Tensor):

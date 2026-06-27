@@ -63,6 +63,7 @@ class SACCore(nn.Module):
         init_alpha: float = 0.2,
         autotune_alpha: bool = True,
         target_entropy: float = None,
+        critic_activation: str = "relu",
         lr_decay_lambda=None,
         device: str = "cpu",
     ):
@@ -73,8 +74,8 @@ class SACCore(nn.Module):
         self.device = device
 
         self.actor = actor
-        self.q1 = QCritic(state_dim, u_dim, critic_dim)
-        self.q2 = QCritic(state_dim, u_dim, critic_dim)
+        self.q1 = QCritic(state_dim, u_dim, critic_dim, activation=critic_activation)
+        self.q2 = QCritic(state_dim, u_dim, critic_dim, activation=critic_activation)
         self.q1_targ = deepcopy(self.q1)
         self.q2_targ = deepcopy(self.q2)
         for p in self.q1_targ.parameters():

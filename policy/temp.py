@@ -99,10 +99,13 @@ class TEMP(Base):
         W_entropy_scaler: float = 1e-3,
         cmg_minibatch_size: int = 1024,
         cmg_updates_per_iter: int = 50,
+        use_c1c2_loss: bool = False,
         reward_norm_beta: float = 0.99,
         # reward shaping
         tracking_scaler: float = 1.0,
         control_scaler: float = 0.0,
+        # critic
+        critic_activation: str = "relu",
         # PPO params (used when optimal_policy == "ppo")
         eps_clip: float = 0.2,
         K: int = 5,
@@ -136,6 +139,7 @@ class TEMP(Base):
         self.W_entropy_scaler = W_entropy_scaler
         self.cmg_minibatch_size = cmg_minibatch_size
         self.cmg_updates_per_iter = cmg_updates_per_iter
+        self.use_c1c2_loss = use_c1c2_loss
         self.tracking_scaler = tracking_scaler
         self.control_scaler = control_scaler
 
@@ -160,7 +164,8 @@ class TEMP(Base):
                 state_dim, u_dim, self.con_actor, list(critic_dim),
                 gamma=gamma_contracting, tau=tau, actor_lr=actor_lr,
                 critic_lr=critic_lr, alpha_lr=alpha_lr, init_alpha=init_alpha,
-                autotune_alpha=autotune_alpha, lr_decay_lambda=self.lr_decay_lambda, device=device,
+                autotune_alpha=autotune_alpha, critic_activation=critic_activation,
+                lr_decay_lambda=self.lr_decay_lambda, device=device,
             )
             if not con_only:
                 self.opt_actor = SACActor(
@@ -172,7 +177,8 @@ class TEMP(Base):
                     state_dim, u_dim, self.opt_actor, list(critic_dim),
                     gamma=gamma_optimal, tau=tau, actor_lr=actor_lr,
                     critic_lr=critic_lr, alpha_lr=alpha_lr, init_alpha=init_alpha,
-                    autotune_alpha=autotune_alpha, lr_decay_lambda=self.lr_decay_lambda, device=device,
+                    autotune_alpha=autotune_alpha, critic_activation=critic_activation,
+                    lr_decay_lambda=self.lr_decay_lambda, device=device,
                 )
             else:
                 self.opt_actor = None
@@ -193,7 +199,7 @@ class TEMP(Base):
                     x_dim=x_dim, u_dim=u_dim, hidden_dim=list(actor_dim),
                     mode="stochastic", anneal_stddev=anneal_stddev, activation=actor_activation,
                 )
-            con_critic = RLCritic(state_dim, hidden_dim=list(critic_dim))
+            con_critic = RLCritic(state_dim, hidden_dim=list(critic_dim), activation=critic_activation)
             self.con_ppo = PPO(
                 x_dim=x_dim, u_dim=u_dim, latent_dim=x_dim,
                 actor=self.con_actor, critic=con_critic,
@@ -216,7 +222,7 @@ class TEMP(Base):
                         x_dim=x_dim, u_dim=u_dim, hidden_dim=list(actor_dim),
                         mode="stochastic", anneal_stddev=anneal_stddev, activation=actor_activation,
                     )
-                opt_critic = RLCritic(state_dim, hidden_dim=list(critic_dim))
+                opt_critic = RLCritic(state_dim, hidden_dim=list(critic_dim), activation=critic_activation)
                 self.opt_ppo = PPO(
                     x_dim=x_dim, u_dim=u_dim, latent_dim=x_dim,
                     actor=self.opt_actor, critic=opt_critic,
@@ -361,14 +367,16 @@ class TEMP(Base):
         W = self._bound_W(raw_W)
         M = torch.linalg.solve(W, I.unsqueeze(0).expand(W.shape[0], -1, -1))
 
-        f, B, _ = self.get_f_and_B(x)
+        f, B, Bbot = self.get_f_and_B(x)
         f = f.to(self._dtype).to(self.device)
         B = B.to(self._dtype).to(self.device)
+        Bbot = Bbot.to(self._dtype).to(self.device)
 
         DfDx = self.Jacobian(f, x)
         DBDx = self.B_Jacobian(B, x)
         f = f.detach()
         B = B.detach()
+        Bbot = Bbot.detach()
 
         A = DfDx + sum(
             u[:, i].unsqueeze(-1).unsqueeze(-1) * DBDx[:, :, :, i]
@@ -392,6 +400,28 @@ class TEMP(Base):
             "pd_reg": pd_reg.item(),
             "entropy_loss": entropy_loss.item(),
         }
+
+        if self.use_c1c2_loss:
+            DfW = self.weighted_gradients(W, f, x)
+            DfDxW = matmul(DfDx, W)
+            sym_DfDxW = 0.5 * (DfDxW + transpose(DfDxW, 1, 2))
+            C1_inner = -DfW + 2 * sym_DfDxW + 2 * self.lbd * W
+            C1 = matmul(matmul(transpose(Bbot, 1, 2), C1_inner), Bbot)
+            C1 = C1 + self.eps * torch.eye(C1.shape[-1], device=self.device)
+
+            C2s = []
+            for j in range(self.u_dim):
+                DbW = self.weighted_gradients(W, B[:, :, j], x)
+                DbDxW = matmul(DBDx[:, :, :, j], W)
+                sym_DbDxW = 0.5 * (DbDxW + transpose(DbDxW, 1, 2))
+                C2_inner = DbW - 2 * sym_DbDxW
+                C2s.append(matmul(matmul(transpose(Bbot, 1, 2), C2_inner), Bbot))
+
+            c1_loss, c1_reg = self.loss_pos_matrix_eigen(-C1)
+            c2_loss = sum([(C2**2).reshape(n, -1).sum(1).mean() for C2 in C2s])
+            loss = loss + c1_loss + c2_loss + c1_reg
+            info["c1_loss"] = c1_loss.item()
+            info["c2_loss"] = c2_loss.item()
 
         with torch.no_grad():
             cu_eig = torch.linalg.eigvalsh(
@@ -489,4 +519,7 @@ class TEMP(Base):
             f"{self.name}/CMG/cu_max_eig": info["cu_max_eig"],
             f"{self.name}/CMG/grad_norm": grad_norm,
         }
+        if self.use_c1c2_loss:
+            log[f"{self.name}/CMG/c1_loss"] = info["c1_loss"]
+            log[f"{self.name}/CMG/c2_loss"] = info["c2_loss"]
         return log

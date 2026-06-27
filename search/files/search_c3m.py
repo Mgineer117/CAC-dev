@@ -44,7 +44,7 @@ def prep_args(args, search_args):
 
     # Shorten each trial to 1/5 of the configured C3M training length.
     if getattr(args, "epochs", None) is not None:
-        args.epochs = max(1, int(args.epochs / 5))
+        args.epochs = max(1, int(args.epochs / 2))
 
 
 if __name__ == "__main__":

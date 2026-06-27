@@ -11,6 +11,11 @@ PARAMETERS = {
     "policy_updates_per_cmg_update": {"values": [1, 5, 10, 30]},
 }
 
+def prep_args(args, search_args):
+    if getattr(args, "timesteps", None) is not None:
+        args.timesteps = max(1, int(args.timesteps / 2))
+
+
 if __name__ == "__main__":
     launch_sweep(
         algo_name="carl_m",
@@ -18,4 +23,5 @@ if __name__ == "__main__":
         apply_config=apply_cmg_rl_config,
         default_project="CARL-M-SWEEP",
         default_count=20,
+        prep_args=prep_args,
     )

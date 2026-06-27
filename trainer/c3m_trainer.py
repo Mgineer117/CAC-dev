@@ -52,7 +52,6 @@ class C3MTrainer(Evaluator):
         self.last_perf_score = deque(maxlen=1)
 
         # Train loop
-        batch_size = 2048
         eval_idx = 0
         self.policy.train()
         with tqdm(
@@ -62,7 +61,6 @@ class C3MTrainer(Evaluator):
         ) as pbar:
             while pbar.n < (self.epochs + self.init_epochs):
                 step = pbar.n + 1  # + 1 to avoid zero division
-                logging_step = (step - self.init_epochs) * batch_size + self.init_epochs
 
                 loss_dict, supp_dict, update_time = self.policy.learn()
 
@@ -70,13 +68,13 @@ class C3MTrainer(Evaluator):
                 pbar.update(1)
 
                 # Update environment steps and calculate time metrics
-                loss_dict[f"{self.policy.name}/analytics/timesteps"] = logging_step
+                loss_dict[f"{self.policy.name}/analytics/epochs"] = step
                 loss_dict[f"{self.policy.name}/analytics/update_time"] = update_time
 
-                self.write_log(loss_dict, step=logging_step)
+                self.write_log(loss_dict, step=step)
                 self.write_image(
                     supp_dict,
-                    step=logging_step,
+                    step=step,
                 )
 
                 #### EVALUATIONS ####
@@ -88,11 +86,11 @@ class C3MTrainer(Evaluator):
                     eval_dict, supp_dict = self.evaluate()
 
                     # Manual logging
-                    self.write_log(eval_dict, step=logging_step, eval_log=True)
-                    self.write_image(supp_dict, step=logging_step)
+                    self.write_log(eval_dict, step=step, eval_log=True)
+                    self.write_image(supp_dict, step=step)
                     self.last_perf_score.append(eval_dict["eval/performance_score"])
 
-                    self.save_model(logging_step)
+                    self.save_model(step)
 
             torch.cuda.empty_cache()
 

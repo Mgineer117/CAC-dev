@@ -17,6 +17,11 @@ PARAMETERS = {
     "control_scaler": {"min": 0.0, "max": 1.0},
 }
 
+def prep_args(args, search_args):
+    if getattr(args, "timesteps", None) is not None:
+        args.timesteps = max(1, int(args.timesteps / 2))
+
+
 if __name__ == "__main__":
     launch_sweep(
         algo_name="carl",
@@ -24,4 +29,5 @@ if __name__ == "__main__":
         apply_config=apply_cmg_rl_config,
         default_project="CARL-SWEEP",
         default_count=20,
+        prep_args=prep_args,
     )

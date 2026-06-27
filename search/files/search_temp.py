@@ -12,11 +12,13 @@ SHARED_PARAMS = {
     "temp_gamma_contracting": {"values": [0.0, 0.1]},
     "temp_gamma_optimal": {"values": [0.3, 0.6, 0.9]},
     "temp_cmg_updates_per_iter": {"values": [1, 5, 10, 30]},
+    "temp_use_c1c2_loss": {"values": [True, False]},
     "critic_lr": LR_LOGUNIFORM,
     "actor_lr": LR_LOGUNIFORM,
     "W_lr": LR_LOGUNIFORM,
     "lbd": {"min": 0.01, "max": 3.0},
     "actor_architecture": {"values": ["RL", "CL"]},
+    "critic_activation": {"values": ["elu", "relu", "tanh"]},
 }
 
 # Extra dimensions only meaningful when the optimal policy is SAC.
@@ -90,12 +92,15 @@ def apply_config(args, config):
         "temp_gamma_contracting",
         "temp_gamma_optimal",
         "temp_cmg_updates_per_iter",
+        "temp_use_c1c2_loss",
     ):
         if key in config:
             setattr(args, key, config[key])
 
     if "actor_architecture" in config:
         args.policy_type = config["actor_architecture"]
+    if "critic_activation" in config:
+        args.critic_activation = config["critic_activation"]
 
     # Critic architecture (uniform-width hidden layers).
     if "critic_hidden_size" in config or "critic_depth" in config:
@@ -112,6 +117,11 @@ def add_cli(parser):
     )
 
 
+def prep_args(args, search_args):
+    if getattr(args, "timesteps", None) is not None:
+        args.timesteps = max(1, int(args.timesteps / 2))
+
+
 if __name__ == "__main__":
     launch_sweep(
         algo_name="temp",
@@ -121,4 +131,5 @@ if __name__ == "__main__":
         default_count=20,
         add_cli=add_cli,
         extra_argv=lambda sa: ["--task", sa.task],
+        prep_args=prep_args,
     )

@@ -79,6 +79,8 @@ def get_args():
                    help="Discount of the deployed optimal policy (defaults to --gamma).")
     p.add_argument("--temp-cmg-updates-per-iter", type=int, default=50,
                    help="CMG pd-loss gradient steps per training iteration.")
+    p.add_argument("--temp-use-c1c2-loss", action="store_true", default=False,
+                   help="Also minimise C1/C2 contraction conditions in the TEMP CMG loss.")
 
     # --- network architecture ---
     p.add_argument("--dynamic-dim", type=list, default=[256, 256], help="Dynamics net hidden dims.")
@@ -88,6 +90,7 @@ def get_args():
     p.add_argument("--actor-dim", type=list, default=[256, 256])
     p.add_argument("--actor-activation", type=str, default="tanh", help="['tanh', 'relu', 'elu', 'leaky_relu', 'gelu'].")
     p.add_argument("--critic-dim", type=list, default=[256, 256])
+    p.add_argument("--critic-activation", type=str, default="relu", help="['tanh', 'relu', 'elu'].")
 
     # --- training schedule ---
     p.add_argument("--epochs", type=int, default=None)

@@ -145,13 +145,13 @@ class SACActor(BaseActor):
 class QCritic(nn.Module):
     """State-action value network Q(s, a)."""
 
-    def __init__(self, state_dim: int, u_dim: int, hidden_dim: list):
+    def __init__(self, state_dim: int, u_dim: int, hidden_dim: list, activation="relu"):
         super().__init__()
         self.model = MLP(
             state_dim + u_dim,
             list(hidden_dim),
             1,
-            activation=nn.ReLU(),
+            activation=get_activation(activation),
             initialization="critic",
         )
 

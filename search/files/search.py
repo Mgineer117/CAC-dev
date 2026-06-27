@@ -22,6 +22,11 @@ def apply_config(args, config):
         args.entropy_scaler = config.entropy_scaler
 
 
+def prep_args(args, search_args):
+    if getattr(args, "timesteps", None) is not None:
+        args.timesteps = max(1, int(args.timesteps / 2))
+
+
 if __name__ == "__main__":
     launch_sweep(
         algo_name="ppo",
@@ -30,4 +35,5 @@ if __name__ == "__main__":
         default_project="AEOS-SWEEP",
         default_count=20,
         metric="max_eval_return",
+        prep_args=prep_args,
     )

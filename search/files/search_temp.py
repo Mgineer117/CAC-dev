@@ -12,6 +12,7 @@ SHARED_PARAMS = {
     "temp_gamma_contracting": {"values": [0.0, 0.1]},
     "temp_gamma_optimal": {"values": [0.3, 0.6, 0.9]},
     "temp_cmg_updates_per_iter": {"values": [1, 5, 10, 30]},
+    "temp_use_c1c2_loss": {"values": [True, False]},
     "critic_lr": LR_LOGUNIFORM,
     "actor_lr": LR_LOGUNIFORM,
     "W_lr": LR_LOGUNIFORM,
@@ -90,6 +91,7 @@ def apply_config(args, config):
         "temp_gamma_contracting",
         "temp_gamma_optimal",
         "temp_cmg_updates_per_iter",
+        "temp_use_c1c2_loss",
     ):
         if key in config:
             setattr(args, key, config[key])

@@ -107,15 +107,17 @@ class C3M(Base):
         W = self._bound_W(raw_W)
         M = torch.linalg.solve(W, I.unsqueeze(0).expand(W.shape[0], -1, -1))
 
-        f, B, _ = self.get_f_and_B(x)
+        f, B, Bbot = self.get_f_and_B(x)
         f = f.to(self._dtype).to(self.device)
         B = B.to(self._dtype).to(self.device)
+        Bbot = Bbot.to(self._dtype).to(self.device)
 
         DfDx = self.Jacobian(f, x)
         DBDx = self.B_Jacobian(B, x)
 
         f = f.detach()
         B = B.detach()
+        Bbot = Bbot.detach()
 
         state = torch.concatenate([x, xref, uref], dim=1)
         u, _ = self.actor(state)
@@ -136,18 +138,37 @@ class C3M(Base):
         sym_MABK = 0.5 * (MABK + transpose(MABK, 1, 2))
         Cu = dot_M + 2 * sym_MABK + 2 * self.lbd * M
 
+        # C1: contraction condition in the unactuated directions
+        DfW = self.weighted_gradients(W, f, x)
+        DfDxW = matmul(DfDx, W)
+        sym_DfDxW = 0.5 * (DfDxW + transpose(DfDxW, 1, 2))
+        C1_inner = -DfW + 2 * sym_DfDxW + 2 * self.lbd * W
+        C1 = matmul(matmul(transpose(Bbot, 1, 2), C1_inner), Bbot)
+
+        # C2: compatibility condition for each input channel
+        C2s = []
+        for j in range(self.u_dim):
+            DbW = self.weighted_gradients(W, B[:, :, j], x)
+            DbDxW = matmul(DBDx[:, :, :, j], W)
+            sym_DbDxW = 0.5 * (DbDxW + transpose(DbDxW, 1, 2))
+            C2_inner = DbW - 2 * sym_DbDxW
+            C2s.append(matmul(matmul(transpose(Bbot, 1, 2), C2_inner), Bbot))
+
         overshoot = W - self.w_ub * I
 
         Cu = Cu + self.eps * torch.eye(Cu.shape[-1], device=self.device)
+        C1 = C1 + self.eps * torch.eye(C1.shape[-1], device=self.device)
+        c2_loss = sum([(C2**2).reshape(batch_size, -1).sum(1).mean() for C2 in C2s])
 
         pd_loss, pd_reg = self.loss_pos_matrix_random_sampling(-Cu)
+        c1_loss, c1_reg = self.loss_pos_matrix_random_sampling(-C1)
         overshoot_loss, overshoot_reg = self.loss_pos_matrix_random_sampling(-overshoot)
 
         self.record_eigenvalues(Cu, dot_M, sym_MABK, overshoot)
 
-        loss = overshoot_loss + pd_loss + pd_reg + overshoot_reg
+        loss = overshoot_loss + pd_loss + c1_loss + c2_loss + pd_reg + c1_reg + overshoot_reg
 
-        return loss, {"pd_loss": pd_loss, "overshoot_loss": overshoot_loss}
+        return loss, {"pd_loss": pd_loss, "c1_loss": c1_loss, "c2_loss": c2_loss}
 
     def optimize_params(self, loss: torch.Tensor, optimizer, module, name: str):
         """Take a single optimization step on ``module`` using ``optimizer``.
@@ -211,7 +232,8 @@ class C3M(Base):
         loss_dict = {
             f"{self.name}/loss/loss": loss.item(),
             f"{self.name}/loss/pd_loss": infos["pd_loss"].item(),
-            f"{self.name}/loss/overshoot_loss": infos["overshoot_loss"].item(),
+            f"{self.name}/loss/c1_loss": infos["c1_loss"].item(),
+            f"{self.name}/loss/c2_loss": infos["c2_loss"].item(),
             f"{self.name}/lr/W_lr": self.W_lr_scheduler.get_last_lr()[0] if hasattr(self, "W_lr_scheduler") else 3e-4,
             f"{self.name}/lr/u_lr": self.actor_lr_scheduler.get_last_lr()[0] if hasattr(self, "actor_lr_scheduler") else 1e-4,
         }

@@ -402,7 +402,6 @@ def get_policy(env, args, get_f_and_B, SDC_func=None, logger=None, writer=None):
             W_entropy_scaler=args.W_entropy_scaler,
             cmg_minibatch_size=args.minibatch_size,
             cmg_updates_per_iter=args.temp_cmg_updates_per_iter,
-            use_c1c2_loss=getattr(args, "temp_use_c1c2_loss", False),
             tracking_scaler=env.tracking_scaler,
             control_scaler=env.control_scaler,
             eps_clip=args.eps_clip,

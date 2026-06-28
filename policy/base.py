@@ -53,7 +53,10 @@ class Utilities(nn.Module):
         with torch.no_grad():
             A_sym = 0.5 * (A + A.transpose(-1, -2))  # guard against floating-point asymmetry
             try:
-                eigvals = torch.linalg.eigvalsh(A_sym)
+                if A_sym.device.type == "mps":
+                    eigvals = torch.linalg.eigvalsh(A_sym.cpu())
+                else:
+                    eigvals = torch.linalg.eigvalsh(A_sym)
             except torch.linalg.LinAlgError:
                 eigvals = torch.full(A_sym.shape[:-1], float("nan"), device=A.device)
         return eigvals.mean(0).cpu().numpy()

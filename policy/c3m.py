@@ -139,7 +139,9 @@ class C3M(Base):
         Cu = dot_M + 2 * sym_MABK + 2 * self.lbd * M
 
         # C1: contraction condition in the unactuated directions
-        DfW = self.weighted_gradients(W, f, x)
+        # Compute dW/dx once; reuse for both C1 and C2 to avoid duplicate Jacobian_Matrix calls.
+        DWDx = self.Jacobian_Matrix(W, x)
+        DfW = (DWDx * f.view(batch_size, 1, 1, -1)).sum(dim=3)
         DfDxW = matmul(DfDx, W)
         sym_DfDxW = 0.5 * (DfDxW + transpose(DfDxW, 1, 2))
         C1_inner = -DfW + 2 * sym_DfDxW + 2 * self.lbd * W
@@ -148,7 +150,7 @@ class C3M(Base):
         # C2: compatibility condition for each input channel
         C2s = []
         for j in range(self.u_dim):
-            DbW = self.weighted_gradients(W, B[:, :, j], x)
+            DbW = (DWDx * B[:, :, j].view(batch_size, 1, 1, -1)).sum(dim=3)
             DbDxW = matmul(DBDx[:, :, :, j], W)
             sym_DbDxW = 0.5 * (DbDxW + transpose(DbDxW, 1, 2))
             C2_inner = DbW - 2 * sym_DbDxW

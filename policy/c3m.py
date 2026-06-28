@@ -226,8 +226,16 @@ class C3M(Base):
         if getattr(self, "actor_lr_scheduler", None) is not None:
             self.actor_lr_scheduler.step()
 
+        # Each learn() does `cmg_updates_per_policy_update` metric (CMG) updates plus
+        # one controller update; count that many epochs so the epoch axis reflects the
+        # number of metric gradient steps actually taken.
+        n_epochs = self.cmg_updates_per_policy_update
+        prev_updates = self.num_updates
+        self.num_updates += n_epochs
+
         supp_dict = {}
-        if self.num_updates % 500 == 0:
+        # Render ~every 500 epochs, robust to num_updates advancing by n_epochs at a time.
+        if prev_updates // 500 != self.num_updates // 500:
             fig = self.get_eigenvalue_plot()
             supp_dict["C3M/plot/eigenvalues"] = fig
 
@@ -243,6 +251,5 @@ class C3M(Base):
 
         self.eval()
         update_time = time.time() - t0
-        self.num_updates += 1
 
         return loss_dict, supp_dict, update_time

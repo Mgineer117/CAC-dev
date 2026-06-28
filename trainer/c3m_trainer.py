@@ -54,6 +54,9 @@ class C3MTrainer(Evaluator):
         # Train loop
         eval_idx = 0
         self.policy.train()
+        # Each learn() performs n metric (CMG) updates + one policy update; count those
+        # n as epochs so the epoch axis reflects the metric gradient steps taken.
+        n_epochs = getattr(self.policy, "cmg_updates_per_policy_update", 1)
         with tqdm(
             initial=self.init_epochs,
             total=(self.epochs + self.init_epochs),
@@ -65,7 +68,7 @@ class C3MTrainer(Evaluator):
                 loss_dict, supp_dict, update_time = self.policy.learn()
 
                 # Calculate expected remaining time
-                pbar.update(1)
+                pbar.update(n_epochs)
 
                 # Update environment steps and calculate time metrics
                 loss_dict[f"{self.policy.name}/analytics/epochs"] = step

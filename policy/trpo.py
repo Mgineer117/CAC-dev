@@ -268,6 +268,7 @@ class TRPO(Base):
 
         # Decay the critic LR per the shared schedule (progress set above).
         self.lr_scheduler.step()
+        self.actor.anneal_stddev(progress, mode="exponential")
 
         update_time = time.time() - t0
 

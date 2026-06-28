@@ -202,6 +202,7 @@ class PPO(Base):
         loss_dict.update(grad_dict)
 
         self.ppo_lr_scheduler.step()
+        self.actor.anneal_stddev(progress, mode="exponential")
 
         # Cleanup
         del states, controls, rewards, terminations, old_logprobs

@@ -1,6 +1,6 @@
 {
     "policy_mode": "stochastic",
-    "anneal_stddev": false,
+    "anneal_stddev": true,
     "cmg_mode": "deterministic",
     "W_entropy_scaler": 0.001,
     "num_windows": 1,
